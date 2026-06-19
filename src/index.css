@@ -1,0 +1,410 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Base resets & typography integration */
+body {
+  font-family: var(--font-sans);
+  background-color: #f5f5f4; /* stone-100 */
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   DESKTOP LAYOUT SYSTEM
+   ========================================================================== */
+
+/* Top Header */
+.desk-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  background-color: #1c1917; /* stone-900 */
+  border-bottom: 1px solid #2e2a24;
+  padding: 0 1.5rem;
+  color: #f5f5f4;
+  z-index: 50;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.desk-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  min-width: 32px;
+  height: 32px;
+  background-color: #ea580c; /* orange-600 */
+  color: white;
+  border-radius: 8px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+}
+
+.desk-topbar-sep {
+  width: 1px;
+  height: 20px;
+  background-color: #44403c; /* stone-700 */
+  margin: 0 1rem;
+}
+
+.desk-brand {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  color: #e7e5e4;
+  margin-right: 2rem;
+}
+
+.desk-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.desk-nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #a8a29e; /* stone-400 */
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+}
+
+.desk-nav a:hover {
+  background-color: #292524; /* stone-800 */
+  color: #fafaf9;
+}
+
+.desk-nav a.active {
+  background-color: #292524;
+  color: #ea580c; /* orange-600 */
+  font-weight: 700;
+}
+
+.desk-nav a i {
+  font-size: 14px;
+}
+
+.desk-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.desk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 700;
+  border: 1px solid #44403c;
+  background-color: #292524;
+  color: #a8a29e;
+}
+
+.desk-badge.loading {
+  background-color: #3b82f6;
+  color: white;
+  border-color: #60a5fa;
+}
+
+.desk-user {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #d6d3d1;
+}
+
+/* Sidebar layout */
+.desk-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  background-color: #1c1917; /* stone-900 */
+  border-right: 1px solid #2c2a29;
+  height: 100%;
+  color: #d6d3d1;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.desk-sidebar.collapsed {
+  width: 64px;
+}
+
+.desk-sidebar-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.75rem;
+}
+
+.desk-sidebar.collapsed .desk-sidebar-toggle-row {
+  justify-content: center;
+}
+
+.desk-sidebar-toggle-btn {
+  background: none;
+  border: none;
+  color: #78716c;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.desk-sidebar-toggle-btn:hover {
+  background-color: #292524;
+  color: #e7e5e4;
+}
+
+.desk-sidebar-section {
+  padding: 0 0.5rem;
+  gap: 0.25rem;
+}
+
+.desk-sidebar-label {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #57534e;
+  letter-spacing: 0.1em;
+  padding: 0.75rem 0.75rem 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.desk-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #a8a29e;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.desk-sidebar.collapsed .desk-sidebar-item {
+  justify-content: center;
+  padding: 0.65rem 0;
+  gap: 0;
+}
+
+.desk-sidebar.collapsed .sidebar-text {
+  display: none;
+}
+
+.desk-sidebar-item:hover {
+  background-color: #292524;
+  color: #fafaf9;
+}
+
+.desk-sidebar-item.active {
+  background-color: #ea580c;
+  color: white;
+  font-weight: 600;
+}
+
+.desk-sidebar-item i {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.desk-sidebar-hr {
+  height: 1px;
+  background-color: #2c2a29;
+  margin: 1rem 0.75rem;
+}
+
+.desk-sidebar-footer {
+  font-size: 9px;
+  color: #57534e;
+  padding: 1rem;
+  border-top: 1px solid #2c2a29;
+  margin-top: auto;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Workspace wrapper */
+.desk-workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  height: calc(100vh - 80px); /* header (56px) + statusbar (24px) */
+}
+
+/* Statusbar */
+.desk-statusbar {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  background-color: #1c1917;
+  border-top: 1px solid #2c2a29;
+  color: #78716c;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 0 1rem;
+  gap: 0.5rem;
+}
+
+.desk-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background-color: #22c55e;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.desk-status-sep {
+  color: #44403c;
+}
+
+/* ==========================================================================
+   MOBILE LAYOUT SYSTEM
+   ========================================================================== */
+.mob-root {
+  background-color: #f5f5f4;
+}
+
+.mob-topbar {
+  height: 56px;
+  background-color: #1c1917;
+  border-bottom: 1px solid #2e2a24;
+  padding: 0 1rem;
+  color: white;
+}
+
+.mob-brand-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.5rem;
+  min-width: 28px;
+  height: 28px;
+  background-color: #ea580c;
+  color: white;
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: -0.02em;
+}
+
+.mob-tabbar {
+  display: flex;
+  height: 56px;
+  background-color: #ffffff;
+  border-top: 1px solid #e7e5e4;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  box-shadow: 0 -4px 10px -1px rgba(0, 0, 0, 0.05);
+}
+
+.mob-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: #78716c;
+  cursor: pointer;
+}
+
+.mob-tab i {
+  font-size: 18px;
+}
+
+.mob-tab span {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.mob-tab.active {
+  color: #ea580c;
+}
+
+/* ==========================================================================
+   CUSTOM COMPONENT TWEAKS
+   ========================================================================== */
+
+/* Toast Alert overlay styles */
+.custom-toast {
+  position: fixed;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 9999;
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+}
+
+.custom-toast.info {
+  background-color: #1c1917;
+  color: #f5f5f4;
+  border: 1px solid #44403c;
+}
+
+.custom-toast.error {
+  background-color: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.custom-toast.success {
+  background-color: #f0fdf4;
+  color: #166534;
+  border: 1px solid #86efac;
+}
+
+/* Global scrollbars style */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d6d3d1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a29e;
+}

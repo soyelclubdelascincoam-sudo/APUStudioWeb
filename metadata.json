@@ -1,0 +1,6 @@
+{
+  "name": "Sistema de Costos y Presupuestos",
+  "description": "Sistema ERP de cotización para ingeniería y construcción civil con análisis de precios unitarios (APU), canastas de insumos y reportes profesionales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
