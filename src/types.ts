@@ -79,6 +79,7 @@ export interface Proyecto {
   fecha_fin_estimada?: string | null;
   estado?: EstadoProyecto | string;
   presupuesto_referencial?: number;
+  porcentaje_avance?: number;
   organizacion_id?: string | null;
   created_by?: string | null;
   created_at?: string;

@@ -153,6 +153,7 @@ export default function App() {
   // View state machines
   const [tabActiva, setTabActiva] = useState<'proyectos' | 'insumos' | 'rubros' | 'presupuestos' | 'config' | 'upload' | 'aprobaciones'>('proyectos');
   const [listaProyectos, setListaProyectos] = useState<Proyecto[]>([]);
+  const [actividadesRecientes, setActividadesRecientes] = useState<any[]>([]);
   const [vista, setVista] = useState<'lista' | 'detalle' | 'apu'>('lista');
   const [categoriaAbierta, setCategoriaAbierta] = useState<string | null>(null);
 
@@ -532,12 +533,32 @@ export default function App() {
             nombre_proyecto: p.nombre,
             nombre: p.nombre,
             codigo: p.codigo,
-            cliente: p.cliente || 'Cliente General',
-            ubicacion: p.ubicacion,
-            estado: p.estado || 'en_ejecucion',
+            cliente: p.cliente || '',
+            ubicacion: p.ubicacion || '',
+            estado: p.estado || 'borrador',
             presupuesto_referencial: Number(p.presupuesto_referencial || 0),
+            porcentaje_avance: Number(p.porcentaje_avance || (p.estado === 'finalizado' ? 100 : 0)),
           }));
           setListaProyectos(proysNormalizados);
+        }
+
+        // 5. Cargar actividad reciente de la bitácora de auditoría
+        try {
+          let auditQuery = client
+            .from('bitacora_auditoria')
+            .select('id, tabla_nombre, operacion, actor_email, valores_nuevos, fecha_hora')
+            .order('fecha_hora', { ascending: false })
+            .limit(10);
+
+          if (orgIdValida) {
+            auditQuery = auditQuery.eq('organizacion_id', organizacionActiva.id);
+          }
+          const { data: auditDb, error: errAudit } = await auditQuery;
+          if (!errAudit && auditDb) {
+            setActividadesRecientes(auditDb);
+          }
+        } catch (eAudit) {
+          console.warn('Bitácora de auditoría no disponible o restringida:', eAudit);
         }
       }
       await cargarPresupuestos();
@@ -556,6 +577,49 @@ export default function App() {
   }, [authUser?.id, organizacionActiva?.id, proyectoActivo?.id, cargarDatos]);
 
   // ── CORE ACTIONS AND EVENT CONTROLLERS ───────────────────────────────────────────
+  const actualizarProyectoEnBD = async (proyActualizado: Partial<Proyecto> & { id: string }) => {
+    try {
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
+        const payload: any = {
+          updated_at: new Date().toISOString(),
+        };
+        if (proyActualizado.nombre !== undefined) payload.nombre = proyActualizado.nombre;
+        if (proyActualizado.codigo !== undefined) payload.codigo = proyActualizado.codigo;
+        if (proyActualizado.cliente !== undefined) payload.cliente = proyActualizado.cliente;
+        if (proyActualizado.ubicacion !== undefined) payload.ubicacion = proyActualizado.ubicacion;
+        if (proyActualizado.estado !== undefined) payload.estado = proyActualizado.estado;
+        if (proyActualizado.presupuesto_referencial !== undefined) {
+          payload.presupuesto_referencial = Number(proyActualizado.presupuesto_referencial) || 0;
+        }
+        if (proyActualizado.porcentaje_avance !== undefined) {
+          payload.porcentaje_avance = Number(proyActualizado.porcentaje_avance) || 0;
+        }
+
+        const { error } = await client
+          .from('proyectos')
+          .update(payload)
+          .eq('id', proyActualizado.id);
+
+        if (error) throw error;
+      }
+
+      setListaProyectos(prev =>
+        prev.map(p => (p.id === proyActualizado.id ? { ...p, ...proyActualizado } : p))
+      );
+
+      if (proyectoActivo?.id === proyActualizado.id) {
+        setProyectoActivo(prev => (prev ? { ...prev, ...proyActualizado } : null));
+      }
+
+      mostrarToast('Proyecto actualizado correctamente.', 'success');
+      cargarDatos();
+    } catch (e: any) {
+      console.error('Error al actualizar proyecto:', e);
+      mostrarToast('Error al actualizar proyecto: ' + e.message, 'error');
+    }
+  };
+
   const cambiarTab = (tab: typeof tabActiva) => {
     setTabActiva(tab);
     setVista('lista');
@@ -2047,6 +2111,8 @@ ${catalogoTexto}`;
             {tabActiva === 'proyectos' && (
               <PanelProyectos
                 proyectos={listaProyectos}
+                presupuestos={presupuestos}
+                actividades={actividadesRecientes}
                 proyectoActivo={proyectoActivo}
                 organizacionActiva={organizacionActiva}
                 onSeleccionarProyecto={seleccionarProyecto}
@@ -2059,6 +2125,7 @@ ${catalogoTexto}`;
                   seleccionarProyecto(proy);
                   cambiarTab('presupuestos');
                 }}
+                onActualizarProyecto={actualizarProyectoEnBD}
                 totalPresupuestos={presupuestos.length}
                 cargando={cargando}
                 mostrarToast={mostrarToast}
@@ -2243,6 +2310,8 @@ ${catalogoTexto}`;
             {vista === 'lista' && tabActiva === 'proyectos' && (
               <PanelProyectos
                 proyectos={listaProyectos}
+                presupuestos={presupuestos}
+                actividades={actividadesRecientes}
                 proyectoActivo={proyectoActivo}
                 organizacionActiva={organizacionActiva}
                 onSeleccionarProyecto={seleccionarProyecto}
@@ -2255,6 +2324,7 @@ ${catalogoTexto}`;
                   seleccionarProyecto(proy);
                   cambiarTab('presupuestos');
                 }}
+                onActualizarProyecto={actualizarProyectoEnBD}
                 totalPresupuestos={presupuestos.length}
                 cargando={cargando}
                 mostrarToast={mostrarToast}
