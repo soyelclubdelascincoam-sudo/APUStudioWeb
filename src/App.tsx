@@ -442,17 +442,15 @@ export default function App() {
         setInsumoEyh(eyh);
         setInsumosTransp(transp);
 
-        // 3. Cargar rubros de la organización y/o proyecto activo
+        // 3. Cargar rubros: biblioteca global de APUs + rubros de la organización y proyecto
         let rubrosQuery = client
           .from('rubros')
-          .select('*')
-          .eq('organizacion_id', organizacionActiva.id);
+          .select('*');
 
         if (proyectoActivo?.id) {
-          rubrosQuery = client
-            .from('rubros')
-            .select('*')
-            .or(`proyecto_id.eq.${proyectoActivo.id},and(organizacion_id.eq.${organizacionActiva.id},proyecto_id.is.null)`);
+          rubrosQuery = rubrosQuery.or(`es_global.eq.true,organizacion_id.eq.${organizacionActiva.id},proyecto_id.eq.${proyectoActivo.id}`);
+        } else {
+          rubrosQuery = rubrosQuery.or(`es_global.eq.true,organizacion_id.eq.${organizacionActiva.id}`);
         }
 
         const { data: rubrosDb, error: errRubros } = await rubrosQuery.order('nombre');

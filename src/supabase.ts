@@ -418,6 +418,9 @@ class MockQueryBuilder {
 let liveClient: SupabaseClient<Database> | null = null;
 if (isLiveSupabase) {
   liveClient = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+    db: {
+      schema: 'public',
+    },
     auth: {
       persistSession: true,
       autoRefreshToken: true,
@@ -440,6 +443,9 @@ export const supabase: any = isLiveSupabase ? liveClient : mockClient;
 export const getSupabaseClient = (): SupabaseClient<Database> => {
   if (!liveClient) {
     liveClient = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+      db: {
+        schema: 'public',
+      },
       auth: {
         persistSession: true,
         autoRefreshToken: true,
