@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { supabase, isLiveSupabase, getSupabaseClient } from '../supabase';
+import { isLiveSupabase, getSupabaseClient } from '../supabase';
 import { useAuth } from '../context/AuthContext';
 
 interface LoginProps {
@@ -43,6 +43,8 @@ export default function Login({ onLoginSuccess, mostrarToast }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [nombreCompleto, setNombreCompleto] = useState('');
+  const [recordarme, setRecordarme] = useState(true);
+  const [mostrarPassword, setMostrarPassword] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [recuperacionEnviada, setRecuperacionEnviada] = useState(false);
 
@@ -111,36 +113,27 @@ export default function Login({ onLoginSuccess, mostrarToast }: LoginProps) {
           if (error) throw error;
 
           if (data.user) {
-            mostrarToast('¡Bienvenido de vuelta a APUStudio!', 'success');
+            mostrarToast('¡Bienvenido de nuevo a APUStudio!', 'success');
             await refrescarSesionYDatos();
             onLoginSuccess?.({ email: data.user.email || email, id: data.user.id });
           }
         }
       } else {
-        // Modo simulación local
-        if (modo === 'recuperar') {
-          setRecuperacionEnviada(true);
-          mostrarToast('Modo demo: Enlace de recuperación simulado.', 'info');
-        } else if (modo === 'registro') {
-          mostrarToast('Registro demo simulado con éxito.', 'success');
-          const mockUser = { email: email.trim(), id: 'mock-' + Date.now() };
-          localStorage.setItem('demo_user', JSON.stringify(mockUser));
-          onLoginSuccess?.(mockUser);
-        } else {
-          if (email === 'demo@apustudio.com' && password === 'demo123') {
-            mostrarToast('¡Inicio de sesión demo exitoso!', 'success');
-            const mockUser = { email: 'demo@apustudio.com', id: 'mock-user' };
-            localStorage.setItem('demo_user', JSON.stringify(mockUser));
-            onLoginSuccess?.(mockUser);
-          } else {
-            throw new Error('Credenciales inválidas. Usa demo@apustudio.com / demo123 para el modo local.');
-          }
-        }
+        // Modo simulado local
+        await new Promise((r) => setTimeout(r, 600));
+        const mockUser = {
+          email: email.trim(),
+          id: 'mock-user-123',
+        };
+        localStorage.setItem('demo_user', JSON.stringify(mockUser));
+        mostrarToast('Sesión iniciada en modo local simulado.', 'info');
+        await refrescarSesionYDatos();
+        onLoginSuccess?.(mockUser);
       }
     } catch (err: any) {
-      console.error('Error en autenticación:', err);
-      const mensajeEspanol = traducirErrorAuth(err);
-      mostrarToast(mensajeEspanol, 'error');
+      console.error('Error de autenticación:', err);
+      const mensajeClaro = traducirErrorAuth(err);
+      mostrarToast(mensajeClaro, 'error');
     } finally {
       setCargando(false);
     }
@@ -148,230 +141,247 @@ export default function Login({ onLoginSuccess, mostrarToast }: LoginProps) {
 
   const autoFillDemo = () => {
     setEmail('demo@apustudio.com');
-    setPassword('demo123');
+    setPassword('DemoUser2026!');
     mostrarToast('Credenciales de demostración cargadas.', 'info');
   };
 
   return (
-    <div className="min-h-screen w-screen flex items-center justify-center bg-gradient-to-br from-stone-950 via-stone-900 to-orange-950 relative overflow-hidden px-4">
-      {/* Decorative Blur Blobs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[45vw] h-[45vw] bg-orange-600/10 rounded-full blur-[100px] pointer-events-none animate-pulse"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[45vw] h-[45vw] bg-emerald-600/5 rounded-full blur-[120px] pointer-events-none"></div>
-
-      <div className="w-full max-w-md bg-stone-900/70 backdrop-blur-2xl border border-stone-800/80 rounded-3xl p-8 shadow-2xl relative z-10 font-sans">
-        {/* Logo / Title Section */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-2xl shadow-lg shadow-orange-500/25 mb-3 font-display font-extrabold text-xl tracking-tight">
-            APU
+    <div className="min-h-screen w-screen flex flex-col justify-between bg-slate-50 relative overflow-y-auto font-sans">
+      
+      {/* Top Header links matching Figma */}
+      <header className="w-full px-6 py-4 flex items-center justify-between text-xs text-slate-500 border-b border-slate-100/80 bg-white/60 backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-orange-600 text-white flex items-center justify-center font-bold text-xs">
+            A
           </div>
-          <h1 className="text-2xl font-display font-extrabold text-white tracking-tight">
+          <span className="font-display font-extrabold text-slate-900 tracking-tight text-sm">
             APUStudio
-          </h1>
-          <p className="text-xs text-stone-400 mt-1">
-            Plataforma SaaS de Análisis de Precios Unitarios y Presupuestos de Obra
-          </p>
+          </span>
         </div>
+        <div className="flex items-center gap-5">
+          <a
+            href="#ayuda"
+            onClick={(e) => { e.preventDefault(); mostrarToast('Centro de ayuda en línea disponible para soporte técnico.', 'info'); }}
+            className="hover:text-slate-900 transition-colors flex items-center gap-1.5"
+          >
+            <i className="ti ti-help-circle text-sm text-slate-400"></i> Centro de ayuda
+          </a>
+          <span className="text-slate-300">·</span>
+          <a
+            href="#privacidad"
+            onClick={(e) => { e.preventDefault(); mostrarToast('Términos y condiciones de privacidad de datos de obra.', 'info'); }}
+            className="hover:text-slate-900 transition-colors"
+          >
+            Privacidad
+          </a>
+          <a
+            href="#terminos"
+            onClick={(e) => { e.preventDefault(); mostrarToast('Términos de servicio de la plataforma SaaS.', 'info'); }}
+            className="hover:text-slate-900 transition-colors"
+          >
+            Términos de uso
+          </a>
+        </div>
+      </header>
 
-        {/* Live Server Indicator */}
-        <div className="mb-6">
-          {isLiveSupabase ? (
-            <div className="flex items-center gap-2.5 bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-2.5 rounded-2xl text-[11px] text-emerald-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="font-semibold text-emerald-200">Base de datos de producción conectada</span>
+      {/* Main Container Card matching Figma Frame */}
+      <main className="flex-1 flex items-center justify-center px-4 py-10">
+        <div className="w-full max-w-[420px] bg-white border border-slate-200/90 rounded-3xl p-8 sm:p-10 shadow-xl shadow-slate-200/50 relative z-10">
+          
+          {/* Header Title from Figma */}
+          <div className="mb-6">
+            <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-orange-600 mb-2">
+              <span className="w-1 h-3.5 bg-orange-600 rounded-full inline-block"></span>
+              <span>ESPACIO DE TRABAJO</span>
             </div>
-          ) : (
-            <div className="flex flex-col gap-2.5 bg-amber-500/10 border border-amber-500/25 p-3 rounded-2xl text-[11px] text-amber-300">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                <span className="font-semibold text-amber-200">Modo Simulación Local</span>
+            <h1 className="text-2xl sm:text-[26px] font-display font-extrabold text-slate-900 tracking-tight">
+              Bienvenido de nuevo
+            </h1>
+            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+              Ingresa tus credenciales para continuar con la gestión de tus obras.
+            </p>
+          </div>
+
+          {/* Formulario */}
+          {modo === 'recuperar' && recuperacionEnviada ? (
+            <div className="text-center py-6 space-y-4">
+              <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-xl border border-emerald-100">
+                <i className="ti ti-mail-check"></i>
               </div>
+              <h3 className="text-base font-bold text-slate-900">Revisa tu bandeja de entrada</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Hemos enviado un correo a <strong className="text-slate-800">{email}</strong> con instrucciones para restablecer tu contraseña.
+              </p>
               <button
                 type="button"
-                onClick={autoFillDemo}
-                className="w-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 font-bold py-1.5 rounded-xl text-[10px] uppercase tracking-wider transition-colors cursor-pointer"
+                onClick={() => {
+                  setModo('login');
+                  setRecuperacionEnviada(false);
+                }}
+                className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs transition-colors cursor-pointer"
               >
-                Auto-completar Credenciales Demo
+                Volver a Iniciar Sesión
               </button>
             </div>
-          )}
-        </div>
-
-        {/* Auth Toggle Tabs (Login / Registro / Recuperación) */}
-        {modo !== 'recuperar' ? (
-          <div className="flex bg-stone-950 p-1.5 rounded-2xl mb-6">
-            <button
-              type="button"
-              onClick={() => setModo('login')}
-              className={`flex-1 text-center py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
-                modo === 'login'
-                  ? 'bg-stone-800 text-white shadow-sm'
-                  : 'text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              Iniciar Sesión
-            </button>
-            <button
-              type="button"
-              onClick={() => setModo('registro')}
-              className={`flex-1 text-center py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
-                modo === 'registro'
-                  ? 'bg-stone-800 text-white shadow-sm'
-                  : 'text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              Registrarse
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between mb-6 pb-2 border-b border-stone-800">
-            <h2 className="text-sm font-bold text-white flex items-center gap-2">
-              <i className="ti ti-key text-orange-400"></i> Recuperar Contraseña
-            </h2>
-            <button
-              type="button"
-              onClick={() => {
-                setModo('login');
-                setRecuperacionEnviada(false);
-              }}
-              className="text-xs text-stone-400 hover:text-orange-400 transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <i className="ti ti-arrow-left"></i> Volver
-            </button>
-          </div>
-        )}
-
-        {/* Formulario */}
-        {modo === 'recuperar' && recuperacionEnviada ? (
-          <div className="text-center py-6 space-y-4">
-            <div className="w-12 h-12 bg-emerald-500/15 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-xl border border-emerald-500/30">
-              <i className="ti ti-mail-check"></i>
-            </div>
-            <h3 className="text-base font-bold text-white">Revisa tu bandeja de entrada</h3>
-            <p className="text-xs text-stone-400 leading-relaxed">
-              Hemos enviado las instrucciones para restablecer tu contraseña a <span className="text-white font-medium">{email}</span>.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setModo('login');
-                setRecuperacionEnviada(false);
-              }}
-              className="w-full bg-stone-800 hover:bg-stone-700 text-white font-bold text-xs py-3 rounded-2xl transition-all cursor-pointer mt-4"
-            >
-              Regresar al Inicio de Sesión
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Campo Nombre Completo (solo en registro) */}
-            {modo === 'registro' && (
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-stone-400 uppercase tracking-widest pl-1">
-                  Nombre Completo / Empresa
-                </label>
-                <div className="relative">
-                  <i className="ti ti-user absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 text-sm"></i>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {modo === 'registro' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Nombre Completo o Empresa
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="Ing. Carlos Mendoza"
                     value={nombreCompleto}
                     onChange={(e) => setNombreCompleto(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 border border-stone-800 rounded-2xl bg-stone-950/80 text-white text-xs outline-none focus:border-orange-500 transition-colors font-sans"
+                    placeholder="Ej. Ing. Carlos Rodríguez"
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-orange-500 focus:bg-white transition-all shadow-sm"
                   />
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Campo Correo Electrónico */}
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-black text-stone-400 uppercase tracking-widest pl-1">
-                Correo Electrónico
-              </label>
-              <div className="relative">
-                <i className="ti ti-mail absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 text-sm"></i>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Usuario
+                </label>
                 <input
                   type="email"
                   required
-                  placeholder="ejemplo@constructora.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 border border-stone-800 rounded-2xl bg-stone-950/80 text-white text-xs outline-none focus:border-orange-500 transition-colors font-sans"
+                  placeholder="Ingresa tu usuario o correo"
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-orange-500 focus:bg-white transition-all shadow-sm"
                 />
               </div>
-            </div>
 
-            {/* Campo Contraseña (en Login y Registro) */}
-            {modo !== 'recuperar' && (
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between pl-1">
-                  <label className="text-[10px] font-black text-stone-400 uppercase tracking-widest">
+              {modo !== 'recuperar' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                     Contraseña
                   </label>
-                  {modo === 'login' && (
+                  <div className="relative">
+                    <input
+                      type={mostrarPassword ? 'text' : 'password'}
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Ingresa tu contraseña"
+                      className="w-full px-3.5 py-2.5 pr-10 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-orange-500 focus:bg-white transition-all shadow-sm"
+                    />
                     <button
                       type="button"
-                      onClick={() => setModo('recuperar')}
-                      className="text-[10.5px] text-orange-400/90 hover:text-orange-400 hover:underline transition-colors cursor-pointer"
+                      onClick={() => setMostrarPassword((prev) => !prev)}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer text-sm"
                     >
-                      ¿Olvidaste tu contraseña?
+                      <i className={`ti ${mostrarPassword ? 'ti-eye-off' : 'ti-eye'}`}></i>
                     </button>
-                  )}
+                  </div>
                 </div>
-                <div className="relative">
-                  <i className="ti ti-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-500 text-sm"></i>
-                  <input
-                    type="password"
-                    required
-                    placeholder="••••••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 border border-stone-800 rounded-2xl bg-stone-950/80 text-white text-xs outline-none focus:border-orange-500 transition-colors font-sans"
-                  />
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Botón Principal de Envío */}
-            <button
-              type="submit"
-              disabled={cargando}
-              className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 active:from-orange-700 active:to-orange-850 text-white font-extrabold text-xs uppercase tracking-wider py-4 rounded-2xl shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed mt-6"
-            >
-              {cargando ? (
+              {modo === 'login' && (
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <label className="flex items-center gap-2 text-slate-600 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={recordarme}
+                      onChange={(e) => setRecordarme(e.target.checked)}
+                      className="rounded border-slate-300 text-orange-600 focus:ring-orange-500 w-3.5 h-3.5"
+                    />
+                    <span>Recordarme</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setModo('recuperar')}
+                    className="text-orange-600 hover:text-orange-700 font-semibold cursor-pointer border-none bg-transparent"
+                  >
+                    ¿Olvidaste tu contraseña?
+                  </button>
+                </div>
+              )}
+
+              {/* Botón Principal Naranja con Flecha */}
+              <button
+                type="submit"
+                disabled={cargando}
+                className="w-full mt-2 bg-orange-600 hover:bg-orange-700 active:scale-[0.99] text-white font-bold py-3 rounded-xl text-xs tracking-wide shadow-md shadow-orange-500/25 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {cargando ? (
+                  <>
+                    <i className="ti ti-loader-2 spin text-sm"></i>
+                    <span>Procesando...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      {modo === 'login'
+                        ? 'Iniciar sesión'
+                        : modo === 'registro'
+                        ? 'Crear Cuenta'
+                        : 'Enviar enlace de recuperación'}
+                    </span>
+                    <i className="ti ti-arrow-right text-sm"></i>
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* Bottom Switch between Login / Registro */}
+          <div className="mt-6 pt-5 border-t border-slate-100 text-center space-y-3">
+            <p className="text-xs text-slate-500">
+              {modo === 'login' ? (
                 <>
-                  <i className="ti ti-loader-2 spin"></i>
-                  <span>Procesando...</span>
+                  ¿Aún no tienes acceso?{' '}
+                  <button
+                    type="button"
+                    onClick={() => setModo('registro')}
+                    className="text-orange-600 hover:text-orange-700 font-bold ml-1 cursor-pointer"
+                  >
+                    Registrarme
+                  </button>
+                </>
+              ) : modo === 'registro' ? (
+                <>
+                  ¿Ya tienes una cuenta?{' '}
+                  <button
+                    type="button"
+                    onClick={() => setModo('login')}
+                    className="text-orange-600 hover:text-orange-700 font-bold ml-1 cursor-pointer"
+                  >
+                    Iniciar sesión
+                  </button>
                 </>
               ) : (
-                <>
-                  <i
-                    className={`ti ${
-                      modo === 'registro'
-                        ? 'ti-user-plus'
-                        : modo === 'recuperar'
-                        ? 'ti-send'
-                        : 'ti-login'
-                    }`}
-                  ></i>
-                  <span>
-                    {modo === 'registro'
-                      ? 'Crear Cuenta y Espacio'
-                      : modo === 'recuperar'
-                      ? 'Enviar Enlace de Recuperación'
-                      : 'Acceder a APUStudio'}
-                  </span>
-                </>
+                <button
+                  type="button"
+                  onClick={() => setModo('login')}
+                  className="text-orange-600 hover:text-orange-700 font-bold cursor-pointer"
+                >
+                  Volver al formulario de ingreso
+                </button>
               )}
-            </button>
-          </form>
-        )}
+            </p>
 
-        {/* Footer info */}
-        <div className="text-center mt-6 text-[10px] text-stone-500">
-          Plataforma multi-tenant segura con aislamiento de datos RLS en PostgreSQL.
+            {/* Quick Demo Access Button */}
+            <button
+              type="button"
+              onClick={autoFillDemo}
+              className="text-[11px] text-slate-400 hover:text-slate-600 font-medium cursor-pointer underline flex items-center justify-center gap-1 mx-auto"
+            >
+              <i className="ti ti-user-check"></i> Rellenar usuario demo (demo@apustudio.com)
+            </button>
+          </div>
+
         </div>
-      </div>
+      </main>
+
+      {/* Bottom Tagline from Figma */}
+      <footer className="w-full py-4 text-center text-xs text-slate-400 font-medium">
+        Proyectos, APUs y presupuestos en un solo lugar.
+      </footer>
+
     </div>
   );
 }

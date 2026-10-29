@@ -32,6 +32,7 @@ import Login from './components/Login';
 import ProyectoSelectorModal from './components/ProyectoSelectorModal';
 import OrganizacionSelectorModal from './components/OrganizacionSelectorModal';
 import AprobacionesPanel from './components/AprobacionesPanel';
+import PanelProyectos from './components/PanelProyectos';
 import { useAuth } from './context/AuthContext';
 
 export default function App() {
@@ -98,6 +99,12 @@ export default function App() {
     localStorage.setItem('apustudio_proyecto_activo', JSON.stringify(proj));
     localStorage.setItem('proyecto_activo', JSON.stringify(proj));
     setMostrarModalProyectos(false);
+    setListaProyectos((prev) => {
+      if (!prev.some(p => p.id === proj.id)) {
+        return [proj, ...prev];
+      }
+      return prev;
+    });
     mostrarToast(`Proyecto activo: "${proj.nombre_proyecto || proj.nombre}"`, 'info');
   };
 
@@ -144,7 +151,8 @@ export default function App() {
   const [cargandoReceta, setCargandoReceta] = useState(false);
 
   // View state machines
-  const [tabActiva, setTabActiva] = useState<'insumos' | 'rubros' | 'presupuestos' | 'config' | 'upload' | 'aprobaciones'>('insumos');
+  const [tabActiva, setTabActiva] = useState<'proyectos' | 'insumos' | 'rubros' | 'presupuestos' | 'config' | 'upload' | 'aprobaciones'>('proyectos');
+  const [listaProyectos, setListaProyectos] = useState<Proyecto[]>([]);
   const [vista, setVista] = useState<'lista' | 'detalle' | 'apu'>('lista');
   const [categoriaAbierta, setCategoriaAbierta] = useState<string | null>(null);
 
@@ -508,6 +516,29 @@ export default function App() {
         }));
 
         setTodosLosRubros(normalizedRubros);
+
+        // 4. Cargar proyectos de la organización activa
+        let proysQuery = client.from('proyectos').select('*');
+        if (orgIdValida) {
+          proysQuery = proysQuery.eq('organizacion_id', organizacionActiva.id);
+        }
+        const { data: proysDb, error: errProys } = await proysQuery.order('created_at', { ascending: false });
+        if (errProys) {
+          console.error('Error cargando proyectos:', errProys);
+        } else if (proysDb) {
+          const proysNormalizados: Proyecto[] = proysDb.map((p: any) => ({
+            ...p,
+            id: p.id,
+            nombre_proyecto: p.nombre,
+            nombre: p.nombre,
+            codigo: p.codigo,
+            cliente: p.cliente || 'Cliente General',
+            ubicacion: p.ubicacion,
+            estado: p.estado || 'en_ejecucion',
+            presupuesto_referencial: Number(p.presupuesto_referencial || 0),
+          }));
+          setListaProyectos(proysNormalizados);
+        }
       }
       await cargarPresupuestos();
     } catch (err) {
@@ -1622,8 +1653,8 @@ ${catalogoTexto}`;
             />
           )}
 
-          {/* Proyecto Selector Modal (Aparece si hay org activa pero no hay proyecto activo o al hacer clic en Cambiar) */}
-          {organizacionActiva && (!proyectoActivo || mostrarModalProyectos) && (
+          {/* Proyecto Selector Modal (Aparece solo cuando el usuario lo solicita explícitamente para crear o cambiar obra) */}
+          {organizacionActiva && mostrarModalProyectos && (
             <ProyectoSelectorModal
               usuarioId={usuario.id}
               usuarioEmail={usuario.email}
@@ -1650,209 +1681,389 @@ ${catalogoTexto}`;
           {/* ╚══════════════════════════════════════╝ */}
           {!isMobile ? (
         <div className="desk-root flex flex-col w-screen h-screen overflow-hidden">
-          {/* Header */}
-          <header id="desktop-app-header" className="desk-topbar">
-            <div className="desk-logo select-none">APUStudio</div>
-            <div className="desk-topbar-sep"></div>
-
-            {/* Selector de Organización / Constructora Activa */}
-            {organizacionActiva && (
-              <div
-                onClick={() => setMostrarModalOrganizaciones(true)}
-                className="flex items-center gap-2 bg-stone-900 border border-stone-800 hover:border-orange-500/40 px-3 py-1.5 rounded-2xl text-xs shadow-sm cursor-pointer transition-colors mr-2 select-none"
-                title="Cambiar de Constructora / Organización"
+          {/* Header Superior - Figma Style */}
+          <header id="desktop-app-header" className="desk-topbar px-6 py-3 flex items-center justify-between border-b border-slate-200 bg-white">
+            {/* Breadcrumb Navigation */}
+            <div className="flex items-center gap-2 text-sm">
+              <span 
+                className="text-slate-400 font-medium hover:text-slate-700 transition-colors cursor-pointer" 
+                onClick={() => cambiarTab('proyectos')}
               >
-                <i className="ti ti-building-skyscraper text-orange-400 text-sm"></i>
-                <span className="font-bold text-white max-w-[150px] truncate">
-                  {organizacionActiva.nombre}
-                </span>
-                <span className="bg-orange-500/20 text-orange-400 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
-                  {rolOrg || 'Miembro'}
-                </span>
-                <i className="ti ti-selector text-stone-500 text-xs"></i>
-              </div>
-            )}
-
-            {/* Active Project Badge Selector */}
-            {proyectoActivo && (
-              <div className="flex items-center gap-2 bg-stone-900 border border-stone-800 px-3 py-1.5 rounded-2xl text-xs shadow-sm">
-                <i className="ti ti-building font-medium text-orange-400"></i>
-                <span className="font-bold text-white max-w-[140px] truncate" title={proyectoActivo.nombre_proyecto}>
-                  {proyectoActivo.nombre_proyecto}
-                </span>
-                {proyectoActivo.miRol === 'admin' && (
-                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
-                    ADMIN
-                  </span>
-                )}
-                {proyectoActivo.miRol === 'editor' && (
-                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
-                    EDITOR
-                  </span>
-                )}
-                {proyectoActivo.miRol === 'viewer' && (
-                  <span className="bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
-                    LECTOR
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setMostrarModalProyectos(true)}
-                  className="text-[10.5px] text-orange-400 hover:text-orange-300 font-bold ml-1 border-none bg-transparent cursor-pointer underline"
-                >
-                  Cambiar
-                </button>
-              </div>
-            )}
-
-            <nav className="desk-nav flex items-center ml-auto">
-              <a
-                id="tab-btn-insumos"
-                className={tabActiva === 'insumos' ? 'active font-bold' : ''}
-                onClick={() => cambiarTab('insumos')}
-              >
-                <i className="ti ti-building-warehouse"></i> Insumos
-              </a>
-              <a
-                id="tab-btn-rubros"
-                className={tabActiva === 'rubros' ? 'active font-bold' : ''}
-                onClick={() => cambiarTab('rubros')}
-              >
-                <i className="ti ti-clipboard-list"></i> Rubros (APU)
-              </a>
-              <a
-                id="tab-btn-presupuestos"
-                className={tabActiva === 'presupuestos' ? 'active font-bold' : ''}
-                onClick={() => cambiarTab('presupuestos')}
-              >
-                <i className="ti ti-report-money"></i> Presupuestos
-              </a>
-              {(esDuenoOAdmin || puedeAprobarEnProyecto || proyectoActivo?.miRol === 'admin' || proyectoActivo?.miRol === 'director') && (
-                <a
-                  id="tab-btn-aprobaciones"
-                  className={tabActiva === 'aprobaciones' ? 'active font-bold' : ''}
-                  onClick={() => cambiarTab('aprobaciones')}
-                >
-                  <i className="ti ti-check text-orange-500"></i> Aprobaciones y Auditoría
-                </a>
-              )}
-              <a
-                id="tab-btn-config"
-                className={tabActiva === 'config' ? 'active font-bold' : ''}
-                onClick={() => cambiarTab('config')}
-              >
-                <i className="ti ti-adjustments"></i> Configuración IA
-              </a>
-              <a
-                id="tab-btn-upload"
-                className={tabActiva === 'upload' ? 'active font-bold' : ''}
-                onClick={() => cambiarTab('upload')}
-              >
-                <i className="ti ti-file-upload"></i> Importar APU
-              </a>
-            </nav>
-            <div className="desk-topbar-right flex items-center gap-3">
-              <span className={`desk-badge text-[10px] ${cargando ? 'loading' : ''} px-2.5 py-1 rounded-md`}>
-                <i className={`ti ${cargando ? 'ti-loader-2 spin' : 'ti-database'}`}></i>
-                {cargando ? 'Conectando...' : isLiveSupabase ? 'CONECTADO' : 'MODO LOCAL'}
+                Espacio de trabajo
               </span>
-              <div className="flex items-center gap-2 bg-stone-850 px-3 py-1.5 rounded-xl border border-stone-800">
-                <span className="desk-user text-xs font-semibold text-stone-300 flex items-center gap-1.5">
-                  <i className="ti ti-user-circle"></i> {usuario?.email || 'Usuario'}
-                </span>
-                <button
-                  onClick={cerrarSesion}
-                  title="Cerrar Sesión"
-                  className="text-stone-400 hover:text-red-400 transition-colors ml-1 p-0.5 rounded cursor-pointer border-none bg-transparent flex items-center justify-center"
-                >
-                  <i className="ti ti-logout text-sm font-bold"></i>
-                </button>
+              <span className="text-slate-300 font-bold">›</span>
+              <span className="text-slate-900 font-bold capitalize">
+                {tabActiva === 'proyectos' ? 'Proyectos' : 
+                 tabActiva === 'insumos' ? 'Catálogo' :
+                 tabActiva === 'rubros' ? 'APUs' :
+                 tabActiva === 'presupuestos' ? 'Presupuestos' :
+                 tabActiva === 'aprobaciones' ? 'Aprobaciones' :
+                 tabActiva === 'config' ? 'Configuración' : 'Importar APU'}
+              </span>
+
+              {/* Si hay un proyecto activo seleccionado, mostrarlo en el breadcrumb */}
+              {proyectoActivo && (
+                <>
+                  <span className="text-slate-300 font-bold">›</span>
+                  <div className="flex items-center gap-2 bg-orange-50 border border-orange-200/80 px-2.5 py-1 rounded-lg">
+                    <i className="ti ti-building text-orange-600 text-xs"></i>
+                    <span className="font-bold text-orange-950 text-xs max-w-[200px] truncate" title={proyectoActivo.nombre_proyecto || proyectoActivo.nombre}>
+                      {proyectoActivo.nombre_proyecto || proyectoActivo.nombre}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMostrarModalProyectos(true)}
+                      className="text-[11px] text-orange-600 hover:text-orange-800 font-bold ml-1 border-none bg-transparent cursor-pointer underline"
+                    >
+                      Cambiar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProyectoActivo(null);
+                        localStorage.removeItem('apustudio_proyecto_activo');
+                        localStorage.removeItem('proyecto_activo');
+                        cambiarTab('proyectos');
+                        mostrarToast('Vista general de proyectos activa.', 'info');
+                      }}
+                      title="Quitar filtro de obra activa"
+                      className="text-slate-400 hover:text-slate-600 text-xs border-none bg-transparent cursor-pointer p-0.5"
+                    >
+                      <i className="ti ti-x"></i>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Central Quick Search */}
+            <div className="flex-1 max-w-md mx-6">
+              <div className="relative">
+                <i className="ti ti-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                <input
+                  type="text"
+                  placeholder="Buscar en tu espacio... ⌘K"
+                  className="w-full pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:border-orange-500 focus:bg-white transition-all shadow-2xs"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      setBusqueda((e.target as HTMLInputElement).value);
+                    }
+                  }}
+                />
               </div>
+            </div>
+
+            {/* Right Tools & Status */}
+            <div className="flex items-center gap-3">
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                cargando 
+                  ? 'bg-blue-50 text-blue-600 border-blue-200' 
+                  : isLiveSupabase 
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                    : 'bg-amber-50 text-amber-700 border-amber-200'
+              }`}>
+                <span className={`w-2 h-2 rounded-full ${cargando ? 'bg-blue-500 animate-pulse' : isLiveSupabase ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+                {cargando ? 'Sincronizando...' : isLiveSupabase ? 'CONECTADO' : 'LOCAL'}
+              </span>
+
+              <button
+                type="button"
+                className="w-8 h-8 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors relative cursor-pointer"
+                title="Notificaciones"
+              >
+                <i className="ti ti-bell text-sm"></i>
+                <span className="w-2 h-2 rounded-full bg-orange-500 absolute top-1.5 right-1.5"></span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => cambiarTab('config')}
+                className="w-8 h-8 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 flex items-center justify-center transition-colors cursor-pointer"
+                title="Ajustes y Parámetros"
+              >
+                <i className="ti ti-help text-sm"></i>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMostrarModalProyectos(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+              >
+                <i className="ti ti-plus"></i>
+                <span>Nueva Obra</span>
+              </button>
             </div>
           </header>
 
           <div className="desk-workspace flex flex-1 overflow-hidden">
-            {/* Sidebar Desktop */}
-            <aside id="desktop-app-sidebar" className={`desk-sidebar ${sidebarColapsado ? 'collapsed' : ''}`}>
-              <div className="desk-sidebar-toggle-row">
+            {/* Sidebar Desktop - Clean Light Figma Theme */}
+            <aside id="desktop-app-sidebar" className={`desk-sidebar bg-white border-r border-slate-200 ${sidebarColapsado ? 'collapsed' : ''} flex flex-col h-full`}>
+              {/* Sidebar Header: Logo & Branding */}
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                {!sidebarColapsado && (
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-orange-600 text-white flex items-center justify-center shadow-sm font-black text-base">
+                      <i className="ti ti-building-arch"></i>
+                    </div>
+                    <div>
+                      <span className="font-extrabold text-slate-900 tracking-tight text-base font-display">APUStudio</span>
+                      <span className="text-[10px] text-orange-600 font-bold block uppercase tracking-wider -mt-1">Enterprise</span>
+                    </div>
+                  </div>
+                )}
                 <button
                   id="btn-toggle-sidebar"
-                  className="desk-sidebar-toggle-btn cursor-pointer"
+                  className="desk-sidebar-toggle-btn cursor-pointer p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors ml-auto"
                   onClick={toggleSidebar}
-                  title="Alternar visibilidad del panel lateral"
+                  title="Colapsar menú"
                 >
-                  <i
-                    className={`ti ${sidebarColapsado ? 'ti-layout-sidebar-expand' : 'ti-layout-sidebar-collapse'}`}
-                  ></i>
+                  <i className={`ti ${sidebarColapsado ? 'ti-layout-sidebar-expand' : 'ti-layout-sidebar-collapse'}`}></i>
                 </button>
               </div>
 
-              <div className="desk-sidebar-section flex flex-col">
-                {!sidebarColapsado && <div className="desk-sidebar-label">Gestión Operativa</div>}
-                <div
-                  id="side-btn-insumos"
-                  className={`desk-sidebar-item ${tabActiva === 'insumos' ? 'active' : ''}`}
-                  onClick={() => cambiarTab('insumos')}
-                >
-                  <i className="ti ti-box"></i>
-                  {!sidebarColapsado && <span className="sidebar-text">Inventario e Insumos</span>}
-                </div>
-                <div
-                  id="side-btn-rubros"
-                  className={`desk-sidebar-item ${tabActiva === 'rubros' ? 'active' : ''}`}
-                  onClick={() => cambiarTab('rubros')}
-                >
-                  <i className="ti ti-list-check"></i>
-                  {!sidebarColapsado && <span className="sidebar-text">Precios Unitarios</span>}
-                </div>
-                <div
-                  id="side-btn-presupuestos"
-                  className={`desk-sidebar-item ${tabActiva === 'presupuestos' ? 'active' : ''}`}
-                  onClick={() => cambiarTab('presupuestos')}
-                >
-                  <i className="ti ti-file-invoice"></i>
-                  {!sidebarColapsado && <span className="sidebar-text">Presupuestos</span>}
-                </div>
-                <div
-                  id="side-btn-upload"
-                  className={`desk-sidebar-item ${tabActiva === 'upload' ? 'active' : ''}`}
-                  onClick={() => cambiarTab('upload')}
-                >
-                  <i className="ti ti-file-upload"></i>
-                  {!sidebarColapsado && <span className="sidebar-text">Importar APU (PDF)</span>}
-                </div>
-                {(esDuenoOAdmin || puedeAprobarEnProyecto || proyectoActivo?.miRol === 'admin' || proyectoActivo?.miRol === 'director') && (
+              {/* Workspace Selector Card */}
+              {!sidebarColapsado && organizacionActiva && (
+                <div className="p-3">
                   <div
-                    id="side-btn-aprobaciones"
-                    className={`desk-sidebar-item ${tabActiva === 'aprobaciones' ? 'active' : ''}`}
-                    onClick={() => cambiarTab('aprobaciones')}
+                    onClick={() => setMostrarModalOrganizaciones(true)}
+                    className="p-2.5 rounded-xl border border-slate-200/90 bg-slate-50 hover:bg-slate-100/80 transition-all cursor-pointer flex items-center justify-between group shadow-2xs"
+                    title="Cambiar Constructora / Organización"
                   >
-                    <i className="ti ti-check text-orange-500"></i>
-                    {!sidebarColapsado && <span className="sidebar-text">Aprobaciones y Auditoría</span>}
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-orange-600 flex items-center justify-center text-sm shrink-0 shadow-2xs">
+                        <i className="ti ti-building-skyscraper"></i>
+                      </div>
+                      <div className="min-w-0 text-left">
+                        <p className="text-xs font-bold text-slate-900 truncate leading-tight group-hover:text-orange-600 transition-colors">
+                          {organizacionActiva.nombre}
+                        </p>
+                        <p className="text-[10px] text-slate-500 font-medium truncate">
+                          {rolOrg || 'Empresa'} • {listaProyectos.length} {listaProyectos.length === 1 ? 'obra' : 'obras'}
+                        </p>
+                      </div>
+                    </div>
+                    <i className="ti ti-selector text-slate-400 text-xs shrink-0 ml-1"></i>
                   </div>
-                )}
-              </div>
-
-              <div className="desk-sidebar-hr"></div>
-
-              <div className="desk-sidebar-section flex flex-col">
-                {!sidebarColapsado && <div className="desk-sidebar-label">Configuración</div>}
-                <div
-                  id="side-btn-config"
-                  className={`desk-sidebar-item ${tabActiva === 'config' ? 'active' : ''}`}
-                  onClick={() => cambiarTab('config')}
-                >
-                  <i className="ti ti-settings"></i>
-                  {!sidebarColapsado && <span className="sidebar-text">Ajustes e IA</span>}
-                </div>
-              </div>
-
-              {!sidebarColapsado && (
-                <div className="desk-sidebar-footer text-[10px] text-stone-500 font-semibold uppercase mt-auto p-4 border-t border-stone-850">
-                  v2.5.0 · <span>Plataforma ERP</span>
                 </div>
               )}
+
+              {/* Navigation Items */}
+              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-6">
+                <div>
+                  {!sidebarColapsado && (
+                    <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      GESTIÓN
+                    </p>
+                  )}
+                  <nav className="space-y-1">
+                    {/* Proyectos (Landing Figma) */}
+                    <button
+                      type="button"
+                      id="side-btn-proyectos"
+                      onClick={() => cambiarTab('proyectos')}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border-none text-left ${
+                        tabActiva === 'proyectos'
+                          ? 'bg-orange-50 text-orange-600 font-bold shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      }`}
+                      title="Panel de proyectos"
+                    >
+                      <i className={`ti ti-layout-grid text-sm ${tabActiva === 'proyectos' ? 'text-orange-600' : 'text-slate-400'}`}></i>
+                      {!sidebarColapsado && (
+                        <div className="flex items-center justify-between flex-1">
+                          <span>Proyectos</span>
+                          <span className={`text-[10.5px] px-1.5 py-0.5 rounded-full font-bold ${
+                            tabActiva === 'proyectos' ? 'bg-orange-200/70 text-orange-800' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {listaProyectos.length}
+                          </span>
+                        </div>
+                      )}
+                    </button>
+
+                    {/* Catálogo (Insumos) */}
+                    <button
+                      type="button"
+                      id="side-btn-insumos"
+                      onClick={() => cambiarTab('insumos')}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border-none text-left ${
+                        tabActiva === 'insumos'
+                          ? 'bg-orange-50 text-orange-600 font-bold shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      }`}
+                      title="Catálogo de insumos"
+                    >
+                      <i className={`ti ti-box text-sm ${tabActiva === 'insumos' ? 'text-orange-600' : 'text-slate-400'}`}></i>
+                      {!sidebarColapsado && <span>Catálogo</span>}
+                    </button>
+
+                    {/* APUs (Rubros) */}
+                    <button
+                      type="button"
+                      id="side-btn-rubros"
+                      onClick={() => cambiarTab('rubros')}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border-none text-left ${
+                        tabActiva === 'rubros'
+                          ? 'bg-orange-50 text-orange-600 font-bold shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      }`}
+                      title="Análisis de Precios Unitarios"
+                    >
+                      <i className={`ti ti-clipboard-list text-sm ${tabActiva === 'rubros' ? 'text-orange-600' : 'text-slate-400'}`}></i>
+                      {!sidebarColapsado && <span>APUs</span>}
+                    </button>
+
+                    {/* Presupuestos */}
+                    <button
+                      type="button"
+                      id="side-btn-presupuestos"
+                      onClick={() => cambiarTab('presupuestos')}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border-none text-left ${
+                        tabActiva === 'presupuestos'
+                          ? 'bg-orange-50 text-orange-600 font-bold shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      }`}
+                      title="Presupuestos de obra"
+                    >
+                      <i className={`ti ti-file-invoice text-sm ${tabActiva === 'presupuestos' ? 'text-orange-600' : 'text-slate-400'}`}></i>
+                      {!sidebarColapsado && (
+                        <div className="flex items-center justify-between flex-1">
+                          <span>Presupuestos</span>
+                          <span className={`text-[10.5px] px-1.5 py-0.5 rounded-full font-bold ${
+                            tabActiva === 'presupuestos' ? 'bg-orange-200/70 text-orange-800' : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            {presupuestos.length}
+                          </span>
+                        </div>
+                      )}
+                    </button>
+
+                    {/* Equipo */}
+                    <button
+                      type="button"
+                      id="side-btn-equipo"
+                      onClick={() => setMostrarModalOrganizaciones(true)}
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-all cursor-pointer border-none text-left"
+                      title="Equipo y colaboradores"
+                    >
+                      <i className="ti ti-users text-sm text-slate-400"></i>
+                      {!sidebarColapsado && <span>Equipo</span>}
+                    </button>
+
+                    {/* Aprobaciones y Auditoría */}
+                    {(esDuenoOAdmin || puedeAprobarEnProyecto || proyectoActivo?.miRol === 'admin' || proyectoActivo?.miRol === 'director') && (
+                      <button
+                        type="button"
+                        id="side-btn-aprobaciones"
+                        onClick={() => cambiarTab('aprobaciones')}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border-none text-left ${
+                          tabActiva === 'aprobaciones'
+                            ? 'bg-orange-50 text-orange-600 font-bold shadow-2xs'
+                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                        }`}
+                        title="Aprobaciones y Auditoría"
+                      >
+                        <i className={`ti ti-shield-check text-sm ${tabActiva === 'aprobaciones' ? 'text-orange-600' : 'text-slate-400'}`}></i>
+                        {!sidebarColapsado && <span>Aprobaciones</span>}
+                      </button>
+                    )}
+                  </nav>
+                </div>
+
+                {/* Second Navigation Section: Herramientas / Ajustes */}
+                <div>
+                  {!sidebarColapsado && (
+                    <p className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                      SISTEMA
+                    </p>
+                  )}
+                  <nav className="space-y-1">
+                    {/* Importar APU */}
+                    <button
+                      type="button"
+                      id="side-btn-upload"
+                      onClick={() => cambiarTab('upload')}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border-none text-left ${
+                        tabActiva === 'upload'
+                          ? 'bg-orange-50 text-orange-600 font-bold shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      }`}
+                      title="Importar APU desde PDF o Excel"
+                    >
+                      <i className={`ti ti-file-upload text-sm ${tabActiva === 'upload' ? 'text-orange-600' : 'text-slate-400'}`}></i>
+                      {!sidebarColapsado && <span>Importar APU</span>}
+                    </button>
+
+                    {/* Configuración */}
+                    <button
+                      type="button"
+                      id="side-btn-config"
+                      onClick={() => cambiarTab('config')}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer border-none text-left ${
+                        tabActiva === 'config'
+                          ? 'bg-orange-50 text-orange-600 font-bold shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      }`}
+                      title="Configuración de IA y Parámetros"
+                    >
+                      <i className={`ti ti-settings text-sm ${tabActiva === 'config' ? 'text-orange-600' : 'text-slate-400'}`}></i>
+                      {!sidebarColapsado && <span>Configuración</span>}
+                    </button>
+                  </nav>
+                </div>
+              </div>
+
+              {/* Sidebar Footer: User Profile */}
+              <div className="p-3 border-t border-slate-200 bg-slate-50/60">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-700 font-black text-xs flex items-center justify-center shrink-0 border border-orange-200">
+                      {usuario?.email ? usuario.email.substring(0, 2).toUpperCase() : 'US'}
+                    </div>
+                    {!sidebarColapsado && (
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 truncate">
+                          {usuario?.email?.split('@')[0] || 'Usuario'}
+                        </p>
+                        <p className="text-[10px] text-slate-500 truncate">
+                          {usuario?.email}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={cerrarSesion}
+                    title="Cerrar sesión"
+                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer border-none bg-transparent"
+                  >
+                    <i className="ti ti-logout text-sm"></i>
+                  </button>
+                </div>
+              </div>
             </aside>
+
+            {/* TAB CONTROLS DESKTOP */}
+            {tabActiva === 'proyectos' && (
+              <PanelProyectos
+                proyectos={listaProyectos}
+                proyectoActivo={proyectoActivo}
+                organizacionActiva={organizacionActiva}
+                onSeleccionarProyecto={seleccionarProyecto}
+                onAbrirModalNuevoProyecto={() => setMostrarModalProyectos(true)}
+                onIrAPUs={(proy) => {
+                  seleccionarProyecto(proy);
+                  cambiarTab('rubros');
+                }}
+                onIrPresupuestos={(proy) => {
+                  seleccionarProyecto(proy);
+                  cambiarTab('presupuestos');
+                }}
+                totalPresupuestos={presupuestos.length}
+                cargando={cargando}
+                mostrarToast={mostrarToast}
+              />
+            )}
 
             {/* TAB CONTROLS DESKTOP */}
             {tabActiva === 'insumos' && (
@@ -2028,6 +2239,28 @@ ${catalogoTexto}`;
           </header>
 
           <main className="mob-scroll flex-1 overflow-y-auto bg-stone-100 p-4 pb-20">
+            {/* VIEW list - Proyectos en Mobile */}
+            {vista === 'lista' && tabActiva === 'proyectos' && (
+              <PanelProyectos
+                proyectos={listaProyectos}
+                proyectoActivo={proyectoActivo}
+                organizacionActiva={organizacionActiva}
+                onSeleccionarProyecto={seleccionarProyecto}
+                onAbrirModalNuevoProyecto={() => setMostrarModalProyectos(true)}
+                onIrAPUs={(proy) => {
+                  seleccionarProyecto(proy);
+                  cambiarTab('rubros');
+                }}
+                onIrPresupuestos={(proy) => {
+                  seleccionarProyecto(proy);
+                  cambiarTab('presupuestos');
+                }}
+                totalPresupuestos={presupuestos.length}
+                cargando={cargando}
+                mostrarToast={mostrarToast}
+              />
+            )}
+
             {/* VIEW list - Insumos */}
             {vista === 'lista' && tabActiva === 'insumos' && (
               <div className="space-y-4">
@@ -2593,6 +2826,13 @@ ${catalogoTexto}`;
           {/* Navigation bar mobile */}
           <nav id="mobile-app-tabbar" className="mob-tabbar flex-shrink-0">
             <button
+              className={`mob-tab ${tabActiva === 'proyectos' ? 'active' : ''}`}
+              onClick={() => cambiarTab('proyectos')}
+            >
+              <i className="ti ti-layout-grid"></i>
+              <span>Obras</span>
+            </button>
+            <button
               className={`mob-tab ${tabActiva === 'insumos' ? 'active' : ''}`}
               onClick={() => cambiarTab('insumos')}
             >
@@ -2604,21 +2844,14 @@ ${catalogoTexto}`;
               onClick={() => cambiarTab('rubros')}
             >
               <i className="ti ti-clipboard-list"></i>
-              <span>Índices</span>
+              <span>APUs</span>
             </button>
             <button
               className={`mob-tab ${tabActiva === 'presupuestos' ? 'active' : ''}`}
               onClick={() => cambiarTab('presupuestos')}
             >
               <i className="ti ti-report-money"></i>
-              <span>Reportes</span>
-            </button>
-            <button
-              className={`mob-tab ${tabActiva === 'upload' ? 'active' : ''}`}
-              onClick={() => cambiarTab('upload')}
-            >
-              <i className="ti ti-file-upload"></i>
-              <span>Cargar APU</span>
+              <span>Presupuestos</span>
             </button>
             <button
               className={`mob-tab ${tabActiva === 'config' ? 'active' : ''}`}

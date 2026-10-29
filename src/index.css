@@ -26,12 +26,12 @@ body {
   align-items: center;
   justify-content: space-between;
   height: 56px;
-  background-color: #1c1917; /* stone-900 */
-  border-bottom: 1px solid #2e2a24;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
   padding: 0 1.5rem;
-  color: #f5f5f4;
+  color: #1e293b;
   z-index: 50;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
 }
 
 .desk-logo {
@@ -53,7 +53,7 @@ body {
 .desk-topbar-sep {
   width: 1px;
   height: 20px;
-  background-color: #44403c; /* stone-700 */
+  background-color: #e2e8f0;
   margin: 0 1rem;
 }
 
@@ -62,7 +62,7 @@ body {
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.05em;
-  color: #e7e5e4;
+  color: #1e293b;
   margin-right: 2rem;
 }
 
@@ -80,19 +80,19 @@ body {
   border-radius: 8px;
   font-size: 12px;
   font-weight: 500;
-  color: #a8a29e; /* stone-400 */
+  color: #64748b;
   cursor: pointer;
   transition: all 0.2s ease;
   text-decoration: none;
 }
 
 .desk-nav a:hover {
-  background-color: #292524; /* stone-800 */
-  color: #fafaf9;
+  background-color: #f1f5f9;
+  color: #0f172a;
 }
 
 .desk-nav a.active {
-  background-color: #292524;
+  background-color: #fff7ed;
   color: #ea580c; /* orange-600 */
   font-weight: 700;
 }
@@ -112,22 +112,22 @@ body {
   align-items: center;
   gap: 0.35rem;
   font-weight: 700;
-  border: 1px solid #44403c;
-  background-color: #292524;
-  color: #a8a29e;
+  border: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+  color: #10b981;
 }
 
 .desk-badge.loading {
-  background-color: #3b82f6;
-  color: white;
-  border-color: #60a5fa;
+  background-color: #eff6ff;
+  color: #2563eb;
+  border-color: #bfdbfe;
 }
 
 .desk-user {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  color: #d6d3d1;
+  color: #334155;
 }
 
 /* Sidebar layout */
@@ -135,10 +135,10 @@ body {
   display: flex;
   flex-direction: column;
   width: 240px;
-  background-color: #1c1917; /* stone-900 */
-  border-right: 1px solid #2c2a29;
+  background-color: #ffffff;
+  border-right: 1px solid #e2e8f0;
   height: 100%;
-  color: #d6d3d1;
+  color: #475569;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   overflow-y: auto;
   flex-shrink: 0;
@@ -161,7 +161,7 @@ body {
 .desk-sidebar-toggle-btn {
   background: none;
   border: none;
-  color: #78716c;
+  color: #94a3b8;
   font-size: 16px;
   cursor: pointer;
   padding: 4px;
@@ -170,8 +170,8 @@ body {
 }
 
 .desk-sidebar-toggle-btn:hover {
-  background-color: #292524;
-  color: #e7e5e4;
+  background-color: #f1f5f9;
+  color: #0f172a;
 }
 
 .desk-sidebar-section {
@@ -180,11 +180,11 @@ body {
 }
 
 .desk-sidebar-label {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
-  color: #57534e;
-  letter-spacing: 0.1em;
+  color: #94a3b8;
+  letter-spacing: 0.08em;
   padding: 0.75rem 0.75rem 0.25rem;
   white-space: nowrap;
   overflow: hidden;
@@ -195,14 +195,15 @@ body {
   align-items: center;
   gap: 0.75rem;
   padding: 0.65rem 0.75rem;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #a8a29e;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #64748b;
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
   overflow: hidden;
+  margin: 0.1rem 0.25rem;
 }
 
 .desk-sidebar.collapsed .desk-sidebar-item {
@@ -216,14 +217,14 @@ body {
 }
 
 .desk-sidebar-item:hover {
-  background-color: #292524;
-  color: #fafaf9;
+  background-color: #f8fafc;
+  color: #0f172a;
 }
 
 .desk-sidebar-item.active {
-  background-color: #ea580c;
-  color: white;
-  font-weight: 600;
+  background-color: #fff7ed;
+  color: #ea580c;
+  font-weight: 700;
 }
 
 .desk-sidebar-item i {
@@ -233,15 +234,15 @@ body {
 
 .desk-sidebar-hr {
   height: 1px;
-  background-color: #2c2a29;
-  margin: 1rem 0.75rem;
+  background-color: #e2e8f0;
+  margin: 0.75rem 0.75rem;
 }
 
 .desk-sidebar-footer {
-  font-size: 9px;
-  color: #57534e;
+  font-size: 10px;
+  color: #94a3b8;
   padding: 1rem;
-  border-top: 1px solid #2c2a29;
+  border-top: 1px solid #e2e8f0;
   margin-top: auto;
   white-space: nowrap;
   overflow: hidden;
@@ -260,9 +261,9 @@ body {
   display: flex;
   align-items: center;
   height: 24px;
-  background-color: #1c1917;
-  border-top: 1px solid #2c2a29;
-  color: #78716c;
+  background-color: #ffffff;
+  border-top: 1px solid #e2e8f0;
+  color: #64748b;
   font-size: 10px;
   font-weight: 500;
   padding: 0 1rem;
@@ -279,7 +280,7 @@ body {
 }
 
 .desk-status-sep {
-  color: #44403c;
+  color: #cbd5e1;
 }
 
 /* ==========================================================================
