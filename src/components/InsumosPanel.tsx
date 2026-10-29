@@ -22,6 +22,7 @@ interface InsumosPanelProps {
   getNombre: (item: any) => string;
   getPrecio: (item: any) => any;
   camposExtra: [string, any][];
+  proyectoActivo?: any;
 }
 
 export default function InsumosPanel({
@@ -46,6 +47,7 @@ export default function InsumosPanel({
   getNombre,
   getPrecio,
   camposExtra,
+  proyectoActivo,
 }: InsumosPanelProps) {
   return (
     <div className="flex-1 flex overflow-hidden bg-stone-50">
@@ -142,10 +144,10 @@ export default function InsumosPanel({
                     <i className="ti ti-check-double"></i> Verificado
                   </span>
                   <span className="bg-stone-100 text-stone-600 border border-stone-200 text-[10px] font-mono font-semibold px-2.5 py-0.5 rounded-full select-none">
-                    ID: {insumoSeleccionado.id_insumo_mat || insumoSeleccionado.id_insumo_mob || insumoSeleccionado.id_insumo_eyh || insumoSeleccionado.id_insumo_transp || insumoSeleccionado.id || insumoSeleccionado.id_insumo}
+                    ID: {insumoSeleccionado.id_insumo_mat || insumoSeleccionado.id_insumo_mob || insumoSeleccionado.id_insumo_eyh || insumoSeleccionado.id_insumo_transp || insumoSeleccionado.id || insumoSeleccionado.id_insumo || insumoSeleccionado.insumo_id}
                   </span>
                 </div>
-                {!editando && (
+                {!editando && proyectoActivo?.miRol !== 'lector' && (
                   <button
                     onClick={iniciarEdicion}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-900 text-white rounded-xl text-xs font-bold hover:bg-orange-600 transition-colors cursor-pointer"
@@ -183,7 +185,39 @@ export default function InsumosPanel({
                         {key.replace(/_/g, ' ')}
                       </span>
                       {editando ? (
-                        isPrice ? (
+                        key === 'es_porcentaje' ? (
+                          <div className="flex items-center gap-2 pt-1">
+                            <input
+                              type="checkbox"
+                              checked={!!tempEdit[key]}
+                              onChange={(e) =>
+                                setTempEdit((prev: any) => ({
+                                  ...prev,
+                                  [key]: e.target.checked,
+                                }))
+                              }
+                              className="w-4 h-4 text-orange-600 border-stone-300 rounded focus:ring-orange-500 cursor-pointer"
+                              id={key}
+                            />
+                            <label htmlFor={key} className="text-xs text-stone-700 font-semibold cursor-pointer">
+                              Sí, calcular como porcentaje
+                            </label>
+                          </div>
+                        ) : key === 'base_calculo' ? (
+                          <select
+                            value={tempEdit[key] ?? 'PROPIO'}
+                            onChange={(e) =>
+                              setTempEdit((prev: any) => ({
+                                ...prev,
+                                [key]: e.target.value,
+                              }))
+                            }
+                            className="w-full p-2.5 border border-stone-300 rounded-xl bg-white text-xs outline-none focus:border-orange-500 font-semibold text-stone-700 cursor-pointer"
+                          >
+                            <option value="PROPIO">PROPIO (Costo por hora/unidad)</option>
+                            <option value="MOB">MOB (Porcentaje de la Mano de Obra)</option>
+                          </select>
+                        ) : isPrice ? (
                           <input
                             type="number"
                             step="0.01"
@@ -214,7 +248,11 @@ export default function InsumosPanel({
                               : 'bg-stone-50 border-stone-200 text-stone-700'
                           }`}
                         >
-                          {isPrice && val ? '$ ' + Number(val).toFixed(2) : (val || '—')}
+                          {isPrice && val ? '$ ' + Number(val).toFixed(2) : (
+                            key === 'es_porcentaje' ? (val ? 'Sí (Calculado como %)' : 'No') :
+                            key === 'base_calculo' ? (val === 'MOB' ? 'Porcentaje de Mano de Obra (MoB)' : 'Costo de Equipo Propio') :
+                            (val || '—')
+                          )}
                         </div>
                       )}
                     </div>

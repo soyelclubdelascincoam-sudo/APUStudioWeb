@@ -1,23 +1,529 @@
-import React from 'react';
-import { isLiveSupabase } from '../supabase';
-
-import { ConfigIA } from '../types';
+import React, { useState, useEffect } from 'react';
+import { isLiveSupabase, getSupabaseClient } from '../supabase';
+import { useAuth } from '../context/AuthContext';
+import { ConfigIA, Proyecto } from '../types';
 
 interface ConfigPanelProps {
   configIA: ConfigIA;
   setConfigIA: React.Dispatch<React.SetStateAction<any>>;
+  proyectoActivo?: Proyecto | null;
+  mostrarToast?: (mensaje: string, tipo?: 'info' | 'success' | 'warning' | 'error') => void;
+  abrirSelectorOrg?: () => void;
+  abrirSelectorProyecto?: () => void;
 }
 
-export default function ConfigPanel({ configIA, setConfigIA }: ConfigPanelProps) {
-  const [verEsquema, setVerEsquema] = React.useState(false);
-  
-  // Variables del cliente (enmascaradas)
+interface MiembroConPerfil {
+  id: string;
+  user_id: string;
+  rol: string;
+  activo: boolean;
+  perfil?: {
+    nombre_completo: string | null;
+    email: string;
+    telefono: string | null;
+  } | null;
+}
+
+export default function ConfigPanel({
+  configIA,
+  setConfigIA,
+  proyectoActivo,
+  mostrarToast,
+  abrirSelectorOrg,
+  abrirSelectorProyecto,
+}: ConfigPanelProps) {
+  const {
+    user,
+    perfil,
+    organizacionActiva,
+    rolOrg,
+    esDuenoOAdmin,
+    actualizarPerfil,
+    actualizarOrganizacionActiva,
+    cerrarSesion,
+  } = useAuth();
+
+  // Estados de edición del perfil
+  const [nombreCompleto, setNombreCompleto] = useState(perfil?.nombre_completo || '');
+  const [telefono, setTelefono] = useState(perfil?.telefono || '');
+  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
+
+  // Estados de edición de la organización
+  const [nombreOrg, setNombreOrg] = useState(organizacionActiva?.nombre || '');
+  const [rucOrg, setRucOrg] = useState(organizacionActiva?.ruc_identificacion || '');
+  const [guardandoOrg, setGuardandoOrg] = useState(false);
+
+  // Estados del equipo / miembros de la organización
+  const [miembros, setMiembros] = useState<MiembroConPerfil[]>([]);
+  const [cargandoMiembros, setCargandoMiembros] = useState(false);
+  const [emailNuevoMiembro, setEmailNuevoMiembro] = useState('');
+  const [rolNuevoMiembro, setRolNuevoMiembro] = useState<'administrador' | 'miembro'>('miembro');
+  const [invitandoMiembro, setInvitandoMiembro] = useState(false);
+
+  // Sincronizar inputs cuando cambian perfil u organización
+  useEffect(() => {
+    if (perfil) {
+      setNombreCompleto(perfil.nombre_completo || '');
+      setTelefono(perfil.telefono || '');
+    }
+  }, [perfil]);
+
+  useEffect(() => {
+    if (organizacionActiva) {
+      setNombreOrg(organizacionActiva.nombre || '');
+      setRucOrg(organizacionActiva.ruc_identificacion || '');
+      cargarMiembrosOrg(organizacionActiva.id);
+    }
+  }, [organizacionActiva?.id]);
+
+  const cargarMiembrosOrg = async (orgId: string) => {
+    if (!isLiveSupabase) return;
+    setCargandoMiembros(true);
+    try {
+      const client = getSupabaseClient();
+      const { data, error } = await client
+        .from('miembros_organizacion')
+        .select(`
+          id,
+          user_id,
+          rol,
+          activo,
+          perfil:perfiles (
+            nombre_completo,
+            email,
+            telefono
+          )
+        `)
+        .eq('organizacion_id', orgId);
+
+      if (error) throw error;
+      setMiembros((data as unknown as MiembroConPerfil[]) || []);
+    } catch (err) {
+      console.error('Error cargando miembros de la organización:', err);
+    } finally {
+      setCargandoMiembros(false);
+    }
+  };
+
+  const handleGuardarPerfil = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGuardandoPerfil(true);
+    try {
+      await actualizarPerfil({
+        nombre_completo: nombreCompleto.trim() || null,
+        telefono: telefono.trim() || null,
+      });
+      if (mostrarToast) mostrarToast('¡Perfil actualizado con éxito!', 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al guardar perfil';
+      if (mostrarToast) mostrarToast(msg, 'error');
+    } finally {
+      setGuardandoPerfil(false);
+    }
+  };
+
+  const handleGuardarOrg = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!esDuenoOAdmin) return;
+    if (!nombreOrg.trim()) {
+      if (mostrarToast) mostrarToast('El nombre de la empresa no puede estar vacío.', 'warning');
+      return;
+    }
+
+    setGuardandoOrg(true);
+    try {
+      await actualizarOrganizacionActiva({
+        nombre: nombreOrg.trim(),
+        ruc_identificacion: rucOrg.trim() || null,
+      });
+      if (mostrarToast) mostrarToast('¡Datos de la constructora actualizados!', 'success');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al actualizar organización';
+      if (mostrarToast) mostrarToast(msg, 'error');
+    } finally {
+      setGuardandoOrg(false);
+    }
+  };
+
+  const handleInvitarMiembro = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!esDuenoOAdmin || !organizacionActiva) return;
+    if (!emailNuevoMiembro.trim()) {
+      if (mostrarToast) mostrarToast('Ingresa el correo electrónico del colaborador.', 'warning');
+      return;
+    }
+
+    setInvitandoMiembro(true);
+    try {
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
+        // Buscar si existe un perfil con ese correo
+        const { data: userPerfil, error: pErr } = await client
+          .from('perfiles')
+          .select('id, email')
+          .eq('email', emailNuevoMiembro.trim().toLowerCase())
+          .maybeSingle();
+
+        if (pErr) throw pErr;
+
+        if (!userPerfil) {
+          if (mostrarToast) {
+            mostrarToast(
+              'El usuario aún no se ha registrado en APUStudio. Pídele que cree su cuenta con ese correo para asignarlo.',
+              'warning'
+            );
+          }
+          return;
+        }
+
+        // Asignar en miembros_organizacion
+        const { error: insErr } = await client.from('miembros_organizacion').insert({
+          organizacion_id: organizacionActiva.id,
+          user_id: userPerfil.id,
+          rol: rolNuevoMiembro,
+          activo: true,
+        });
+
+        if (insErr) {
+          if (insErr.message.includes('unique') || insErr.code === '23505') {
+            throw new Error('Este colaborador ya es miembro de la constructora.');
+          }
+          throw insErr;
+        }
+
+        if (mostrarToast) mostrarToast(`¡Colaborador añadido como ${rolNuevoMiembro}!`, 'success');
+        setEmailNuevoMiembro('');
+        await cargarMiembrosOrg(organizacionActiva.id);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al invitar colaborador';
+      if (mostrarToast) mostrarToast(msg, 'error');
+    } finally {
+      setInvitandoMiembro(false);
+    }
+  };
+
+  const copiarCodigoAcceso = () => {
+    if (proyectoActivo?.codigo_acceso || proyectoActivo?.codigo) {
+      const codigo = proyectoActivo.codigo_acceso || proyectoActivo.codigo || '';
+      navigator.clipboard.writeText(codigo);
+      if (mostrarToast) mostrarToast('¡Código de obra copiado al portapapeles!', 'success');
+    }
+  };
+
   const urlConfigurada = (import.meta as any).env.VITE_SUPABASE_URL || '';
 
   return (
-    <div className="flex-1 overflow-y-auto bg-stone-50 p-6 flex flex-col items-center gap-6">
+    <div className="flex-1 overflow-y-auto bg-stone-50 p-6 flex flex-col items-center gap-6 pb-20">
       
-      {/* TARJETA DE ESTADO DE CONEXION SUPABASE */}
+      {/* 1. TARJETA: PERFIL DEL USUARIO */}
+      <div className="w-full max-w-2xl bg-white border border-stone-250 rounded-3xl p-6.5 shadow-sm space-y-5">
+        <div className="flex items-center justify-between border-b border-stone-150 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center font-black text-lg">
+              {perfil?.nombre_completo ? perfil.nombre_completo.charAt(0).toUpperCase() : user?.email?.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <h3 className="text-xs font-black text-orange-600 uppercase tracking-widest flex items-center gap-1.5">
+                <i className="ti ti-user font-medium"></i> Perfil Personal
+              </h3>
+              <h4 className="text-base font-extrabold text-stone-850 mt-0.5">
+                {perfil?.nombre_completo || 'Ingeniero / Constructor'}
+              </h4>
+              <p className="text-xs text-stone-400 font-mono">{user?.email}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={cerrarSesion}
+            className="text-xs font-bold text-rose-600 hover:text-rose-750 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3.5 py-2 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+          >
+            <i className="ti ti-logout"></i> Cerrar Sesión
+          </button>
+        </div>
+
+        <form onSubmit={handleGuardarPerfil} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[11px] font-bold text-stone-600 uppercase tracking-wider block mb-1">
+                Nombre Completo
+              </label>
+              <input
+                type="text"
+                value={nombreCompleto}
+                onChange={(e) => setNombreCompleto(e.target.value)}
+                placeholder="Ej. Ing. Juan Pérez"
+                className="w-full px-3.5 py-2 border border-stone-300 rounded-xl bg-stone-50 text-xs font-semibold outline-none focus:bg-white focus:border-orange-500 transition-all"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-stone-600 uppercase tracking-wider block mb-1">
+                Teléfono / WhatsApp
+              </label>
+              <input
+                type="text"
+                value={telefono}
+                onChange={(e) => setTelefono(e.target.value)}
+                placeholder="Ej. +593 99 123 4567"
+                className="w-full px-3.5 py-2 border border-stone-300 rounded-xl bg-stone-50 text-xs font-semibold outline-none focus:bg-white focus:border-orange-500 transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              disabled={guardandoPerfil}
+              className="bg-stone-900 hover:bg-stone-800 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+            >
+              <i className="ti ti-check"></i>
+              {guardandoPerfil ? 'Guardando...' : 'Guardar Perfil'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* 2. TARJETA: CONSTRUCTORA / ORGANIZACIÓN ACTIVA */}
+      <div className="w-full max-w-2xl bg-white border border-stone-250 rounded-3xl p-6.5 shadow-sm space-y-5">
+        <div className="flex items-center justify-between border-b border-stone-150 pb-4">
+          <div>
+            <h3 className="text-xs font-black text-orange-600 uppercase tracking-widest flex items-center gap-1.5">
+              <i className="ti ti-building font-medium"></i> Empresa / Constructora
+            </h3>
+            <h4 className="text-base font-extrabold text-stone-850 mt-0.5">
+              {organizacionActiva?.nombre || 'Sin constructora'}
+            </h4>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="bg-orange-50 text-orange-700 border border-orange-250 text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full">
+              PLAN: {organizacionActiva?.plan?.toUpperCase() || 'PRO'}
+            </span>
+            <span
+              className={`text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full border ${
+                rolOrg === 'dueño'
+                  ? 'bg-amber-50 text-amber-700 border-amber-300'
+                  : rolOrg === 'administrador'
+                  ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                  : 'bg-stone-100 text-stone-700 border-stone-300'
+              }`}
+            >
+              TU ROL: {rolOrg?.toUpperCase() || 'MIEMBRO'}
+            </span>
+          </div>
+        </div>
+
+        <form onSubmit={handleGuardarOrg} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[11px] font-bold text-stone-600 uppercase tracking-wider block mb-1">
+                Razón Social / Constructora
+              </label>
+              <input
+                type="text"
+                disabled={!esDuenoOAdmin}
+                value={nombreOrg}
+                onChange={(e) => setNombreOrg(e.target.value)}
+                placeholder="Nombre de la empresa"
+                className="w-full px-3.5 py-2 border border-stone-300 rounded-xl bg-stone-50 disabled:bg-stone-100 disabled:text-stone-500 text-xs font-semibold outline-none focus:bg-white focus:border-orange-500 transition-all"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-stone-600 uppercase tracking-wider block mb-1">
+                RUC / Identificación Fiscal
+              </label>
+              <input
+                type="text"
+                disabled={!esDuenoOAdmin}
+                value={rucOrg}
+                onChange={(e) => setRucOrg(e.target.value)}
+                placeholder="Ej. 1790012345001"
+                className="w-full px-3.5 py-2 border border-stone-300 rounded-xl bg-stone-50 disabled:bg-stone-100 disabled:text-stone-500 text-xs font-semibold outline-none focus:bg-white focus:border-orange-500 transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            {abrirSelectorOrg ? (
+              <button
+                type="button"
+                onClick={abrirSelectorOrg}
+                className="text-xs font-bold text-orange-600 hover:text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200 px-3.5 py-2 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <i className="ti ti-switch-horizontal"></i> Cambiar o Fundar Constructora
+              </button>
+            ) : <div />}
+
+            {esDuenoOAdmin && (
+              <button
+                type="submit"
+                disabled={guardandoOrg}
+                className="bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <i className="ti ti-check"></i>
+                {guardandoOrg ? 'Guardando...' : 'Actualizar Empresa'}
+              </button>
+            )}
+          </div>
+        </form>
+
+        {/* LISTADO DE MIEMBROS DE LA ORGANIZACIÓN */}
+        <div className="border-t border-stone-150 pt-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h5 className="text-xs font-extrabold text-stone-850 uppercase tracking-wide">
+                Equipo de la Constructora ({miembros.length})
+              </h5>
+              <p className="text-[11px] text-stone-400">
+                Usuarios con acceso a los catálogos y proyectos de esta empresa.
+              </p>
+            </div>
+          </div>
+
+          {cargandoMiembros ? (
+            <div className="py-4 text-center text-xs text-stone-400">Cargando colaboradores...</div>
+          ) : (
+            <div className="divide-y divide-stone-100 border border-stone-200 rounded-2xl overflow-hidden bg-white">
+              {miembros.map((m) => (
+                <div key={m.id} className="p-3.5 flex items-center justify-between hover:bg-stone-50/70 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-stone-150 text-stone-600 flex items-center justify-center font-bold text-xs">
+                      {m.perfil?.nombre_completo ? m.perfil.nombre_completo.charAt(0) : m.perfil?.email.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-stone-800">
+                        {m.perfil?.nombre_completo || 'Colaborador'}
+                      </div>
+                      <div className="text-[11px] text-stone-400 font-mono">
+                        {m.perfil?.email}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[9.5px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
+                        m.rol === 'dueño'
+                          ? 'bg-amber-50 text-amber-700 border-amber-300'
+                          : m.rol === 'administrador'
+                          ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                          : 'bg-stone-100 text-stone-600 border-stone-250'
+                      }`}
+                    >
+                      {m.rol}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* FORMULARIO DE INVITACIÓN (SOLO DUEÑO O ADMIN) */}
+          {esDuenoOAdmin && (
+            <form onSubmit={handleInvitarMiembro} className="bg-stone-50 border border-stone-200 p-4 rounded-2xl space-y-3">
+              <span className="text-[11px] font-black uppercase tracking-wider text-stone-600 block">
+                Agregar Colaborador a la Empresa
+              </span>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="email"
+                  placeholder="correo@ingenieria.com"
+                  value={emailNuevoMiembro}
+                  onChange={(e) => setEmailNuevoMiembro(e.target.value)}
+                  className="flex-1 px-3.5 py-2 border border-stone-300 rounded-xl bg-white text-xs outline-none focus:border-orange-500"
+                />
+                <select
+                  value={rolNuevoMiembro}
+                  onChange={(e) => setRolNuevoMiembro(e.target.value as any)}
+                  className="px-3 py-2 border border-stone-300 rounded-xl bg-white text-xs font-semibold outline-none focus:border-orange-500"
+                >
+                  <option value="miembro">Miembro Técnico</option>
+                  <option value="administrador">Administrador</option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={invitandoMiembro}
+                  className="bg-stone-900 hover:bg-stone-800 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap"
+                >
+                  {invitandoMiembro ? 'Agregando...' : '+ Añadir'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+
+      {/* 3. TARJETA: PROYECTO / OBRA ACTIVA */}
+      {proyectoActivo ? (
+        <div className="w-full max-w-2xl bg-white border border-stone-250 rounded-3xl p-6.5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between border-b border-stone-150 pb-4">
+            <div>
+              <h3 className="text-xs font-black text-orange-600 uppercase tracking-widest flex items-center gap-1.5">
+                <i className="ti ti-crane font-medium"></i> Obra / Proyecto Activo
+              </h3>
+              <h4 className="text-base font-extrabold text-stone-850 mt-1">
+                {proyectoActivo.nombre || proyectoActivo.nombre_proyecto}
+              </h4>
+              {proyectoActivo.cliente && (
+                <p className="text-xs text-stone-500">Cliente: {proyectoActivo.cliente}</p>
+              )}
+            </div>
+            {abrirSelectorProyecto && (
+              <button
+                type="button"
+                onClick={abrirSelectorProyecto}
+                className="text-xs font-bold text-stone-700 hover:text-stone-900 bg-stone-100 hover:bg-stone-200 border border-stone-300 px-3.5 py-2 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <i className="ti ti-switch-horizontal"></i> Cambiar Proyecto
+              </button>
+            )}
+          </div>
+
+          {(proyectoActivo.codigo_acceso || proyectoActivo.codigo) && (
+            <div className="bg-stone-900 text-white p-4.5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-stone-400 block">
+                  Código de Identificación de Obra
+                </span>
+                <p className="text-xs text-stone-300 mt-0.5">
+                  Código asignado a esta obra física para control y presupuestación.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <code className="bg-stone-950 border border-stone-750 text-orange-400 font-mono text-base font-black px-4 py-2 rounded-xl tracking-widest">
+                  {proyectoActivo.codigo || proyectoActivo.codigo_acceso}
+                </code>
+                <button
+                  type="button"
+                  onClick={copiarCodigoAcceso}
+                  className="bg-orange-600 hover:bg-orange-500 text-white p-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border-none flex items-center justify-center"
+                  title="Copiar Código"
+                >
+                  <i className="ti ti-copy text-base"></i>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="w-full max-w-2xl bg-white border border-stone-250 rounded-3xl p-6.5 shadow-sm flex items-center justify-between">
+          <div>
+            <h4 className="text-sm font-extrabold text-stone-800">Ningún Proyecto Seleccionado</h4>
+            <p className="text-xs text-stone-400 mt-0.5">
+              Selecciona una obra para comenzar a cargar rubros y presupuestos.
+            </p>
+          </div>
+          {abrirSelectorProyecto && (
+            <button
+              type="button"
+              onClick={abrirSelectorProyecto}
+              className="bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-colors cursor-pointer"
+            >
+              Seleccionar Proyecto
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 4. TARJETA DE ESTADO DE CONEXION SUPABASE */}
       <div className="w-full max-w-2xl bg-white border border-stone-250 rounded-3xl p-6.5 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -39,9 +545,9 @@ export default function ConfigPanel({ configIA, setConfigIA }: ConfigPanelProps)
           )}
         </div>
 
-        {isLiveSupabase ? (
+        {isLiveSupabase && (
           <div className="bg-emerald-500/5 border border-emerald-150 p-4 rounded-2xl space-y-2">
-            <span className="text-[10px] font-bold text-stone-405 uppercase tracking-wide block">URL del Proyecto Vinculado:</span>
+            <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wide block">URL del Proyecto Vinculado:</span>
             <div className="flex items-center gap-2">
               <i className="ti ti-link text-emerald-600 font-bold"></i>
               <code className="text-xs font-mono font-bold text-stone-700 bg-white border border-stone-200 px-3 py-1.5 rounded-lg select-all w-full truncate block">
@@ -49,151 +555,13 @@ export default function ConfigPanel({ configIA, setConfigIA }: ConfigPanelProps)
               </code>
             </div>
             <p className="text-[11px] text-stone-500 leading-relaxed mt-2 pl-0.5">
-              El frontend se encuentra comunicado <strong>satisfactoriamente con su backend en vivo de Supabase</strong>. La información de insumos y presupuestos se lee en tiempo real directamente desde sus tablas productivas de Base de Datos.
-            </p>
-          </div>
-        ) : (
-          <div className="bg-amber-500/5 border border-amber-150 p-4.5 rounded-2xl space-y-3">
-            <h5 className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
-              <i className="ti ti-plug"></i> ¿Cómo conectar con tu Base de Datos en Supabase?
-            </h5>
-            <p className="text-[11px] text-stone-500 leading-relaxed">
-              Actualmente estás viendo datos de prueba (local storage simulado) para que la interfaz funcione de inmediato. Para conectar esta interfaz con tus tablas de Supabase en producción que ya tienen datos cargados, solo debes proveer las siguientes variables de entorno:
-            </p>
-            
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-xs bg-white border border-stone-200 p-2.5 rounded-xl">
-                <span>URL de tu API:</span>
-                <code className="font-mono bg-stone-50 text-stone-800 font-bold px-2 py-0.5 rounded text-[10.5px]">VITE_SUPABASE_URL</code>
-              </div>
-              <div className="flex justify-between items-center text-xs bg-white border border-stone-200 p-2.5 rounded-xl">
-                <span>Clave de Acceso Pública Anon:</span>
-                <code className="font-mono bg-stone-50 text-stone-800 font-bold px-2 py-0.5 rounded text-[10.5px]">VITE_SUPABASE_ANON_KEY</code>
-              </div>
-            </div>
-
-            <p className="text-[10px] text-stone-400 italic">
-              * Nota: Puedes configurar estas variables en el panel lateral de ajustes de la plataforma o en el archivo ejecutor .env. Al introducirlas, el frontend reanudará automáticamente la escucha en la URL remota.
+              El frontend se encuentra comunicado <strong>satisfactoriamente con su base de datos Supabase</strong> multi-tenant. Todos los cálculos matemáticos de APU y presupuestos son resueltos de forma inmutable por los triggers de Postgres.
             </p>
           </div>
         )}
-
-        {/* ACCORDION DE DETALLE DE ESQUEMA REQUERIDO DE TABLAS */}
-        <div className="border border-stone-200 rounded-2xl overflow-hidden bg-stone-50">
-          <button
-            onClick={() => setVerEsquema(!verEsquema)}
-            className="w-full p-4 flex justify-between items-center bg-stone-100 hover:bg-stone-200/50 transition-colors text-left cursor-pointer outline-none border-none"
-          >
-            <div className="flex items-center gap-2">
-              <i className="ti ti-table text-stone-600 text-sm"></i>
-              <span className="text-xs font-bold text-stone-700 uppercase">Mapeo de Tablas y Columnas Consultadas</span>
-            </div>
-            <i className={`ti ${verEsquema ? 'ti-chevron-up' : 'ti-chevron-down'} text-stone-400 font-bold`}></i>
-          </button>
-          
-          {verEsquema && (
-            <div className="p-4 bg-white border-t border-stone-200 space-y-4 max-h-96 overflow-y-auto font-sans">
-              <p className="text-[11px] text-stone-500 leading-relaxed border-b border-stone-100 pb-2.5">
-                Para que el frontend pueda cargar adecuadamente la información que ya tienes en tu base de datos de Supabase, tus tablas y sus columnas deben coincidir exactamente con la estructura que consulta el sistema:
-              </p>
-
-              {/* TABLA: INSUMOS DE MATERIALES */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-150">
-                  <span className="font-mono text-xs font-bold text-orange-600 block">INSUMOS_MAT</span>
-                  <span className="text-[9px] text-stone-400 font-bold uppercase">Materiales</span>
-                </div>
-                <div className="text-[10.5px] text-stone-600 space-y-1 pl-2 font-mono">
-                  <div>• <strong className="text-stone-700">id_insumo_mat</strong> (Clave primaria - texto o UUID)</div>
-                  <div>• <strong className="text-stone-700">name_insumo_mat</strong> (Texto - Ej: "Cemento Gris Portland")</div>
-                  <div>• <strong className="text-stone-700">precio_insumo_mat</strong> (Económico / numérico)</div>
-                  <div>• <strong className="text-stone-700">unidad</strong> (Texto, Ej: "bolsa", "kg", "m³")</div>
-                  <div>• <strong className="text-stone-700">proveedor</strong> (Texto - Opcional)</div>
-                </div>
-              </div>
-
-              {/* TABLA: MANO DE OBRA */}
-              <div className="space-y-1.5 pt-2">
-                <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-150">
-                  <span className="font-mono text-xs font-bold text-orange-600 block">INSUMOS_MOB</span>
-                  <span className="text-[9px] text-stone-400 font-bold uppercase">Mano de Obra</span>
-                </div>
-                <div className="text-[10.5px] text-stone-600 space-y-1 pl-2 font-mono">
-                  <div>• <strong className="text-stone-700">id_insumo_mob</strong> (Clave primaria - texto o UUID)</div>
-                  <div>• <strong className="text-stone-700">name_insumo_mob</strong> (Texto - Ej: "Oficial Albañil")</div>
-                  <div>• <strong className="text-stone-700">precio_insumo_mob</strong> (Costo por hora - numérico)</div>
-                  <div>• <strong className="text-stone-700">categoria</strong> (Texto - Ej: "Servicio Profesional/Obrero")</div>
-                </div>
-              </div>
-
-              {/* TABLA: EQUIPOS Y HERRAMIENTAS */}
-              <div className="space-y-1.5 pt-2">
-                <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-150">
-                  <span className="font-mono text-xs font-bold text-orange-600 block">INSUMOS_EYH</span>
-                  <span className="text-[9px] text-stone-400 font-bold uppercase">Equipos y Herramientas</span>
-                </div>
-                <div className="text-[10.5px] text-stone-600 space-y-1 pl-2 font-mono">
-                  <div>• <strong className="text-stone-700">id_insumo_eyh</strong> (Clave primaria - texto o UUID)</div>
-                  <div>• <strong className="text-stone-700">name_insumo_eyh</strong> (Texto - Ej: "Mezcladora de Concreto")</div>
-                  <div>• <strong className="text-stone-700">precio_insumo_eyh</strong> (Costo hora/día - numérico)</div>
-                  <div>• <strong className="text-stone-700">tipo</strong> (Texto - Ej: "Maquinaria pesada", "Manual")</div>
-                </div>
-              </div>
-
-              {/* TABLA: TRANSPORTE */}
-              <div className="space-y-1.5 pt-2">
-                <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-150">
-                  <span className="font-mono text-xs font-bold text-orange-600 block">INSUMOS_TRANSP</span>
-                  <span className="text-[9px] text-stone-400 font-bold uppercase">Transporte y Acarreos</span>
-                </div>
-                <div className="text-[10.5px] text-stone-600 space-y-1 pl-2 font-mono">
-                  <div>• <strong className="text-stone-700">id_insumo_transp</strong> (Clave primaria - texto o UUID)</div>
-                  <div>• <strong className="text-stone-700">name_insumo_transp</strong> (Texto - Ej: "Flete Volqueta 12m³")</div>
-                  <div>• <strong className="text-stone-700">precio_insumo_transp</strong> (Costo por viaje/km - numérico)</div>
-                  <div>• <strong className="text-stone-700">distancia_km</strong> (Distancia media de servicio - opcional)</div>
-                </div>
-              </div>
-
-              {/* TABLA: RUBROS */}
-              <div className="space-y-1.5 pt-2">
-                <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-150">
-                  <span className="font-mono text-xs font-bold text-orange-600 block">RUBROS</span>
-                  <span className="text-[9px] text-stone-400 font-bold uppercase">Rubros o Precios Unitarios</span>
-                </div>
-                <div className="text-[10.5px] text-stone-600 space-y-1 pl-2 font-mono">
-                  <div>• <strong className="text-stone-700">id_rubro</strong> (Clave primaria de búsqueda - texto o UUID)</div>
-                  <div>• <strong className="text-stone-700">nombre_rubro</strong> (Texto descriptivo principal)</div>
-                  <div>• <strong className="text-stone-700">unidad</strong> (Texto de cuantificación - Ej: "m³", "m²", "kg")</div>
-                  <div>• <strong className="text-stone-700">precio_rubro</strong> (Monto acumulado directo - numérico)</div>
-                </div>
-              </div>
-
-              {/* TABLAS DE RECETA (CONEXIÓN ADICIONAL APU) */}
-              <div className="space-y-1.5 pt-2">
-                <div className="flex justify-between items-center bg-stone-50 px-2.5 py-1.5 rounded-lg border border-stone-150">
-                  <span className="font-mono text-xs font-bold text-orange-600 block">RECETA_MAT / MOB / EYH / TRANSP</span>
-                  <span className="text-[9px] text-stone-400 font-bold uppercase">Fórmulas APU</span>
-                </div>
-                <p className="text-[10.5px] text-stone-500 pl-2">
-                  Estas tablas almacenan el desglose de recursos asociados a cada rubro. Se consultan mediante <code className="bg-stone-100 font-mono text-[9px] px-1 rounded font-bold">.eq('id_rubro', id)</code>:
-                </p>
-                <div className="text-[10.5px] text-stone-600 space-y-1 pl-2 font-mono">
-                  <div>• <strong className="text-stone-700">id_rubro</strong> (Relación de enlace con la tabla RUBROS)</div>
-                  <div>• <strong className="text-stone-700">codigo</strong> (Identificador único del insumo - texto)</div>
-                  <div>• <strong className="text-stone-700">descripcion</strong> (Nombre del recurso en la receta)</div>
-                  <div>• <strong className="text-stone-700">unidad</strong> (Soporte métrico)</div>
-                  <div>• <strong className="text-stone-702">cantidad</strong> (Rendimiento por unidad de rubro)</div>
-                  <div>• <strong className="text-stone-750">precio_unitario</strong> (Costo base)</div>
-                  <div>• <strong className="text-stone-750">precio_total</strong> (Subtotal de participación en la fórmula)</div>
-                </div>
-              </div>
-
-            </div>
-          )}
-        </div>
       </div>
 
-      {/* PARAMETROS DE GESTION IA */}
+      {/* 5. PARÁMETROS DE GESTIÓN IA (GEMINI) */}
       <div className="w-full max-w-2xl bg-white border border-stone-200 rounded-3xl p-8 shadow-sm space-y-6">
         <div>
           <h3 className="text-sm font-extrabold text-stone-800 uppercase tracking-tight">
@@ -288,7 +656,7 @@ export default function ConfigPanel({ configIA, setConfigIA }: ConfigPanelProps)
             <button
               onClick={() => setConfigIA((prev: any) => ({ ...prev, normalizarUnidades: !prev.normalizarUnidades }))}
               className={`w-12 h-6.5 rounded-full p-1 transition-colors relative cursor-pointer outline-none ${
-                configIA.normalizarUnidades ? 'bg-orange-650' : 'bg-stone-250'
+                configIA.normalizarUnidades ? 'bg-orange-600' : 'bg-stone-250'
               }`}
             >
               <div
@@ -304,13 +672,13 @@ export default function ConfigPanel({ configIA, setConfigIA }: ConfigPanelProps)
             <div className="flex-1">
               <span className="text-xs font-black text-stone-800 uppercase">Filtro Anticolisiones Transaccionales</span>
               <p className="text-[10px] text-stone-400 mt-0.5 leading-relaxed">
-                Previene entradas duplicadas empleando llaves de integridad compuesta (UP-Serts) al sincronizar con el cluster remoto.
+                Previene entradas duplicadas empleando llaves de integridad compuesta al sincronizar con el cluster remoto.
               </p>
             </div>
             <button
               onClick={() => setConfigIA((prev: any) => ({ ...prev, filtroAntiDuplicados: !prev.filtroAntiDuplicados }))}
               className={`w-12 h-6.5 rounded-full p-1 transition-colors relative cursor-pointer outline-none ${
-                configIA.filtroAntiDuplicados ? 'bg-orange-650' : 'bg-stone-250'
+                configIA.filtroAntiDuplicados ? 'bg-orange-600' : 'bg-stone-250'
               }`}
             >
               <div

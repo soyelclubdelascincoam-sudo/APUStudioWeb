@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { supabase, isLiveSupabase } from './supabase';
+import { supabase, isLiveSupabase, getSupabaseClient } from './supabase';
 import {
   InsumoMaterial,
   InsumoManoObra,
@@ -12,6 +12,8 @@ import {
   Capitulo,
   ConfigIA,
   ToastState,
+  Proyecto,
+  RolProyecto,
 } from './types';
 
 // Import our cohesive modular components
@@ -21,8 +23,28 @@ import PresupuestosPanel from './components/PresupuestosPanel';
 import ConfigPanel from './components/ConfigPanel';
 import ReportModal from './components/ReportModal';
 import UploadPanel from './components/UploadPanel';
+import Login from './components/Login';
+import ProyectoSelectorModal from './components/ProyectoSelectorModal';
+import OrganizacionSelectorModal from './components/OrganizacionSelectorModal';
+import AprobacionesPanel from './components/AprobacionesPanel';
+import { useAuth } from './context/AuthContext';
 
 export default function App() {
+  const {
+    user: authUser,
+    cargando: authCargando,
+    organizaciones,
+    organizacionActiva,
+    rolOrg,
+    proyectoActivo: contextProyectoActivo,
+    cambiarProyectoActivo,
+    cerrarSesion: authCerrarSesion,
+    esDuenoOAdmin,
+    puedeEditarProyecto,
+    puedeAprobarEnProyecto,
+    esSoloLectura,
+  } = useAuth();
+
   // Responsive check
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -34,6 +56,49 @@ export default function App() {
 
   const [sidebarColapsado, setSidebarColapsado] = useState(false);
   const toggleSidebar = () => setSidebarColapsado((p) => !p);
+
+  // Derivar usuario desde AuthContext
+  const usuario = authUser ? { email: authUser.email || '', id: authUser.id } : null;
+
+  // Active Project & Roles State
+  const [proyectoActivo, setProyectoActivo] = useState<Proyecto | null>(() => {
+    const saved = localStorage.getItem('proyecto_activo');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return null;
+  });
+  const [mostrarModalProyectos, setMostrarModalProyectos] = useState(false);
+  const [mostrarModalOrganizaciones, setMostrarModalOrganizaciones] = useState(false);
+
+  // Sincronizar proyectoActivo con el contexto
+  useEffect(() => {
+    if (contextProyectoActivo && !proyectoActivo) {
+      setProyectoActivo(contextProyectoActivo);
+    }
+  }, [contextProyectoActivo, proyectoActivo]);
+
+  const seleccionarProyecto = (proj: Proyecto) => {
+    setProyectoActivo(proj);
+    cambiarProyectoActivo(proj);
+    localStorage.setItem('proyecto_activo', JSON.stringify(proj));
+    setMostrarModalProyectos(false);
+    mostrarToast(`Proyecto activo: "${proj.nombre_proyecto || proj.nombre}"`, 'info');
+  };
+
+  const cerrarSesion = async () => {
+    try {
+      await authCerrarSesion();
+      setProyectoActivo(null);
+      localStorage.removeItem('proyecto_activo');
+      mostrarToast('Sesión cerrada correctamente.', 'info');
+    } catch (error: any) {
+      console.error('Error al cerrar sesión:', error);
+      mostrarToast('No se pudo cerrar la sesión: ' + error.message, 'error');
+    }
+  };
 
   // Toast notification state
   const [toast, setToast] = useState<ToastState>({ visible: false, mensaje: '', tipo: 'info' });
@@ -65,7 +130,7 @@ export default function App() {
   const [cargandoReceta, setCargandoReceta] = useState(false);
 
   // View state machines
-  const [tabActiva, setTabActiva] = useState<'insumos' | 'rubros' | 'presupuestos' | 'config' | 'upload'>('insumos');
+  const [tabActiva, setTabActiva] = useState<'insumos' | 'rubros' | 'presupuestos' | 'config' | 'upload' | 'aprobaciones'>('insumos');
   const [vista, setVista] = useState<'lista' | 'detalle' | 'apu'>('lista');
   const [categoriaAbierta, setCategoriaAbierta] = useState<string | null>(null);
 
@@ -165,52 +230,113 @@ export default function App() {
 
   // ── DATA SYNCHRONIZATION FROM SUPABASE/V_DB ──────────────────────────────────────
   const cargarPresupuestos = async () => {
+    if (!usuario) return;
     try {
-      const { data, error } = await supabase
-        .from('PRESUPUESTOS')
-        .select(`
-          id,
-          nombre,
-          estado,
-          precio_presup_total,
-          fecha_creacion,
-          DETALLES_PRESUPUESTO (
-            id_rubro_presup,
-            nombre_rubro_presup,
-            unidad_rubro_presup,
-            precio_rubro_presup,
-            cantidad_presup,
-            precio_presup,
-            capitulo_presup
-          )
-        `)
-        .order('fecha_creacion', { ascending: false });
+      if (isLiveSupabase && organizacionActiva) {
+        const client = getSupabaseClient();
+        let query = client
+          .from('presupuestos')
+          .select(`
+            id,
+            codigo,
+            nombre,
+            descripcion,
+            estado,
+            porcentaje_indirectos,
+            porcentaje_utilidad,
+            porcentaje_iva,
+            costo_directo_total,
+            costo_indirecto_total,
+            monto_utilidad,
+            subtotal_sin_iva,
+            monto_iva,
+            monto_total,
+            fecha_creacion,
+            proyecto_id,
+            presupuesto_capitulos (
+              id,
+              nombre,
+              numero_orden,
+              costo_directo,
+              presupuesto_items (
+                id,
+                rubro_id,
+                codigo_item,
+                nombre_rubro,
+                unidad,
+                precio_unitario,
+                cantidad,
+                precio_total,
+                numero_orden
+              )
+            )
+          `)
+          .eq('organizacion_id', organizacionActiva.id);
 
-      if (error) throw error;
+        if (proyectoActivo?.id) {
+          query = query.eq('proyecto_id', proyectoActivo.id);
+        }
 
-      if (data) {
-        setPresupuestos(
-          data.map((p: any) => {
-            const parts = (p.nombre || '').split(' | ');
-            return {
-              id: p.id,
-              proyecto: parts[0] || 'Sin nombre',
-              cliente: parts[1] || 'No registrado',
-              fecha: p.fecha_creacion ? p.fecha_creacion.split('T')[0] : 'Upeva ndojehai',
-              estado: p.estado || 'Borrador',
-              monto: Number(p.precio_presup_total || 0),
-              items: (p.DETALLES_PRESUPUESTO || []).map((d: any) => ({
-                id_rubro: d.id_rubro_presup,
-                nombre_rubro: d.nombre_rubro_presup,
-                unidad: d.unidad_rubro_presup,
-                precio: Number(d.precio_rubro_presup || 0),
-                cantidad: Number(d.cantidad_presup || 0),
-                subtotal: Number(d.precio_presup || 0),
-                capitulo_presup: d.capitulo_presup || '',
-              })),
-            };
-          })
-        );
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (error) throw error;
+
+        if (data) {
+          setPresupuestos(
+            data.map((p: any) => {
+              const capitulosList = p.presupuesto_capitulos || [];
+              const allItems: any[] = [];
+              capitulosList.forEach((cap: any) => {
+                (cap.presupuesto_items || []).forEach((it: any) => {
+                  allItems.push({
+                    id: it.id,
+                    id_rubro: it.rubro_id,
+                    nombre_rubro: it.nombre_rubro,
+                    unidad: it.unidad,
+                    precio: Number(it.precio_unitario || 0),
+                    cantidad: Number(it.cantidad || 0),
+                    subtotal: Number(it.precio_total || 0),
+                    capitulo_presup: cap.nombre,
+                  });
+                });
+              });
+
+              return {
+                id: p.id,
+                codigo: p.codigo,
+                proyecto: p.nombre,
+                cliente: p.descripcion ? p.descripcion.replace('Cliente: ', '') : 'Cliente General',
+                fecha: p.fecha_creacion ? p.fecha_creacion.split('T')[0] : new Date().toISOString().split('T')[0],
+                estado: p.estado || 'borrador',
+                porcentaje_indirectos: Number(p.porcentaje_indirectos || 0),
+                porcentaje_utilidad: Number(p.porcentaje_utilidad || 0),
+                porcentaje_iva: Number(p.porcentaje_iva || 0),
+                monto: Number(p.monto_total || 0),
+                costo_directo_total: Number(p.costo_directo_total || 0),
+                costo_indirecto_total: Number(p.costo_indirecto_total || 0),
+                monto_utilidad: Number(p.monto_utilidad || 0),
+                subtotal_sin_iva: Number(p.subtotal_sin_iva || 0),
+                monto_iva: Number(p.monto_iva || 0),
+                monto_total: Number(p.monto_total || 0),
+                proyecto_id: p.proyecto_id,
+                items: allItems,
+                capitulos: capitulosList.map((c: any) => ({
+                  id: c.id,
+                  nombre: c.nombre,
+                  costo_directo: Number(c.costo_directo || 0),
+                  items: (c.presupuesto_items || []).map((it: any) => ({
+                    id: it.id,
+                    id_rubro: it.rubro_id,
+                    nombre_rubro: it.nombre_rubro,
+                    unidad: it.unidad,
+                    precio: Number(it.precio_unitario || 0),
+                    cantidad: Number(it.cantidad || 0),
+                    subtotal: Number(it.precio_total || 0),
+                  }))
+                })),
+              };
+            })
+          );
+        }
       }
     } catch (error) {
       console.error('Error cargando presupuestos:', error);
@@ -219,48 +345,136 @@ export default function App() {
   };
 
   const cargarDatos = async () => {
+    if (!usuario) return;
     setCargando(true);
     try {
-      const [rM, rO, rE, rT, rR] = await Promise.all([
-        supabase.from('INSUMOS_MAT').select('*'),
-        supabase.from('INSUMOS_MOB').select('*'),
-        supabase.from('INSUMOS_EYH').select('*'),
-        supabase.from('INSUMOS_TRANSP').select('*'),
-        supabase.from('RUBROS').select('*'),
-      ]);
+      if (isLiveSupabase && organizacionActiva) {
+        const client = getSupabaseClient();
 
-      // Informar si hay errores específicos en las consultas remota de Supabase
-      const errores = [];
-      if (rM.error) errores.push(`INSUMOS_MAT: ${rM.error.message}`);
-      if (rO.error) errores.push(`INSUMOS_MOB: ${rO.error.message}`);
-      if (rE.error) errores.push(`INSUMOS_EYH: ${rE.error.message}`);
-      if (rT.error) errores.push(`INSUMOS_TRANSP: ${rT.error.message}`);
-      if (rR.error) errores.push(`RUBROS: ${rR.error.message}`);
+        // 1. Obtener catálogos: global + el privado de la organización activa
+        const { data: cats } = await client
+          .from('catalogos')
+          .select('id, nombre, es_global')
+          .or(`es_global.eq.true,organizacion_id.eq.${organizacionActiva.id}`);
 
-      if (errores.length > 0) {
-        console.error('Errores en Supabase:', errores);
-        mostrarToast(`Error Supabase: ${errores.slice(0, 2).join(' | ')}${errores.length > 2 ? ' ...' : ''}`, 'warning');
+        const catalogoIds = (cats || []).map(c => c.id);
+
+        // 2. Cargar insumos de los catálogos accesibles
+        let insumosQuery = client.from('insumos').select('*');
+        if (catalogoIds.length > 0) {
+          insumosQuery = insumosQuery.in('catalogo_id', catalogoIds);
+        }
+
+        const { data: insumosDb, error: errInsumos } = await insumosQuery.order('nombre');
+        if (errInsumos) {
+          console.error('Error cargando insumos:', errInsumos);
+        }
+
+        const allInsumos = insumosDb || [];
+
+        const mat = allInsumos
+          .filter(i => i.categoria === 'materiales')
+          .map(i => ({
+            ...i,
+            id: i.id,
+            id_insumo_mat: i.id,
+            name_insumo_mat: i.nombre,
+            nombre: i.nombre,
+            precio_insumo_mat: Number(i.precio_unitario || 0),
+            precio: Number(i.precio_unitario || 0),
+            precio_unitario: Number(i.precio_unitario || 0),
+            unidad_insumo_mat: i.unidad,
+            unidad: i.unidad,
+          }));
+
+        const mob = allInsumos
+          .filter(i => i.categoria === 'mano_de_obra')
+          .map(i => ({
+            ...i,
+            id: i.id,
+            id_insumo_mob: i.id,
+            name_insumo_mob: i.nombre,
+            nombre: i.nombre,
+            precio_insumo_mob: Number(i.precio_unitario || 0),
+            precio: Number(i.precio_unitario || 0),
+            precio_unitario: Number(i.precio_unitario || 0),
+            unidad_insumo_mob: i.unidad,
+            unidad: i.unidad,
+            categoria: i.categoria_trabajador,
+          }));
+
+        const eyh = allInsumos
+          .filter(i => i.categoria === 'equipos_herramientas')
+          .map(i => ({
+            ...i,
+            id: i.id,
+            id_insumo_eyh: i.id,
+            name_insumo_eyh: i.nombre,
+            nombre: i.nombre,
+            precio_insumo_eyh: Number(i.precio_unitario || 0),
+            precio: Number(i.precio_unitario || 0),
+            precio_unitario: Number(i.precio_unitario || 0),
+            unidad_insumo_eyh: i.unidad,
+            unidad: i.unidad,
+            es_porcentaje: i.es_porcentaje,
+            porcentaje: Number(i.porcentaje || 0),
+            base_calculo: i.base_calculo,
+          }));
+
+        const transp = allInsumos
+          .filter(i => i.categoria === 'transporte')
+          .map(i => ({
+            ...i,
+            id: i.id,
+            id_insumo_transp: i.id,
+            name_insumo_transp: i.nombre,
+            nombre: i.nombre,
+            precio_insumo_transp: Number(i.precio_unitario || 0),
+            precio: Number(i.precio_unitario || 0),
+            precio_unitario: Number(i.precio_unitario || 0),
+            unidad_insumo_transp: i.unidad,
+            unidad: i.unidad,
+            distancia_km: Number(i.distancia_km || 0),
+          }));
+
+        setInsumosMat(mat);
+        setInsumosMob(mob);
+        setInsumoEyh(eyh);
+        setInsumosTransp(transp);
+
+        // 3. Cargar rubros de la organización y/o proyecto activo
+        let rubrosQuery = client
+          .from('rubros')
+          .select('*')
+          .eq('organizacion_id', organizacionActiva.id);
+
+        if (proyectoActivo?.id) {
+          rubrosQuery = client
+            .from('rubros')
+            .select('*')
+            .or(`proyecto_id.eq.${proyectoActivo.id},and(organizacion_id.eq.${organizacionActiva.id},proyecto_id.is.null)`);
+        }
+
+        const { data: rubrosDb, error: errRubros } = await rubrosQuery.order('nombre');
+        if (errRubros) {
+          console.error('Error cargando rubros:', errRubros);
+        }
+
+        const normalizedRubros = (rubrosDb || []).map(r => ({
+          ...r,
+          id: r.id,
+          id_rubro: r.id,
+          nombre_rubro: r.nombre,
+          unidad_rubro: r.unidad,
+          precio_rubro: Number(r.precio_unitario || 0),
+          costo_materiales: Number(r.costo_materiales || 0),
+          costo_mano_obra: Number(r.costo_mano_obra || 0),
+          costo_equipos: Number(r.costo_equipos || 0),
+          costo_transporte: Number(r.costo_transporte || 0),
+        }));
+
+        setTodosLosRubros(normalizedRubros);
       }
-
-      setInsumosMat(rM.data || []);
-      setInsumosMob(rO.data || []);
-      setInsumoEyh(rE.data || []);
-      setInsumosTransp(rT.data || []);
-      const NormalizedRubros = (rR.data || []).map((item: any) => {
-        const u = item.unidad_rubro || item.unidad || 'm³';
-        return {
-          ...item,
-          unidad: u,
-          unidad_rubro: u
-        };
-      });
-
-      setTodosLosRubros(
-        NormalizedRubros.sort((a: any, b: any) =>
-          (a.nombre_rubro || '').localeCompare(b.nombre_rubro || '')
-        )
-      );
-
       await cargarPresupuestos();
     } catch (err) {
       console.error(err);
@@ -271,8 +485,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    cargarDatos();
-  }, []);
+    if (usuario) {
+      cargarDatos();
+    }
+  }, [usuario, proyectoActivo]);
 
   // ── CORE ACTIONS AND EVENT CONTROLLERS ───────────────────────────────────────────
   const cambiarTab = (tab: typeof tabActiva) => {
@@ -302,310 +518,46 @@ export default function App() {
     setRecetaTransp([]);
     const id = item.id_rubro || item.id;
     try {
-      // Función resiliente para consultar diferentes variaciones de tablas, ortografía y columnas de ID
-      const queryCategory = async (primaryTable: string, fallbackTable: string) => {
-        const tableOpts = [
-          primaryTable,
-          primaryTable.toLowerCase(),
-          fallbackTable,
-          fallbackTable.toLowerCase()
-        ].filter(Boolean);
-        const columnOpts = ['id_rubro', 'rubro_id', 'id_rubro_presup', 'id'];
-        const idOptions = [item.id_rubro, item.id].filter(Boolean);
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
+        const { data: rows, error } = await client
+          .from('rubro_insumos')
+          .select('*')
+          .eq('rubro_id', id)
+          .order('created_at', { ascending: true });
 
-        for (const table of tableOpts) {
-          for (const col of columnOpts) {
-            for (const idVal of idOptions) {
-              try {
-                const { data, error } = await supabase.from(table).select('*').eq(col, idVal);
-                if (!error && data && data.length > 0) {
-                  return { data, table };
-                }
-              } catch (err) {
-                // Siguiente combinación
-              }
-            }
-          }
-        }
-        return { data: [], table: primaryTable };
-      };
+        if (error) throw error;
 
-      // Realizar búsquedas usando las tablas solicitadas: RECETA_MAT, RECETA_MOB, RECETA_EYH y RECETA_TRANSP
-      const [rMResult, rOResult, rEResult, rTResult] = await Promise.all([
-        queryCategory('RECETA_MAT', 'receta_mat'),
-        queryCategory('RECETA_MOB', 'receta_mob'),
-        queryCategory('RECETA_EYH', 'receta_eyh'),
-        queryCategory('RECETA_TRANSP', 'RECETA_TRANSP')
-      ]);
+        const normalizarFila = (r: any) => ({
+          id: r.id,
+          id_rubro: r.rubro_id,
+          codigo: r.codigo_insumo || '',
+          descripcion: r.nombre_insumo,
+          unidad: r.unidad_insumo,
+          amount: Number(r.cantidad || 0),
+          cantidad: Number(r.cantidad || 0),
+          rendimiento: Number(r.rendimiento || 1.0),
+          distancia: Number(r.distancia || 0),
+          precio_unitario: Number(r.precio_unitario || 0),
+          precio_total: Number(r.subtotal || 0),
+          es_porcentaje: !!r.es_porcentaje,
+          porcentaje: Number(r.porcentaje || 0),
+          _originalRow: r,
+          _tablaOrigen: 'rubro_insumos',
+        });
 
-      const rM = rMResult.data || [];
-      const rO = rOResult.data || [];
-      const rE = rEResult.data || [];
-      const rT = rTResult.data || [];
+        const mat = (rows || []).filter(r => r.categoria === 'materiales').map(normalizarFila);
+        const mob = (rows || []).filter(r => r.categoria === 'mano_de_obra').map(normalizarFila);
+        const eyh = (rows || []).filter(r => r.categoria === 'equipos_herramientas').map(normalizarFila);
+        const transp = (rows || []).filter(r => r.categoria === 'transporte').map(normalizarFila);
 
-      // Normalizador para asegurar la compatibilidad con las especificaciones de columnas del frontend
-      const normalizarFilaReceta = (row: any, cat?: string, tablaOrigen?: string) => {
-        if (!row) return { codigo: '', descripcion: '', unidad: '', cantidad: 0, precio_unitario: 0, precio_total: 0 };
-        const keys = Object.keys(row);
-
-        // id_insumo_ o similar
-        const idKey = keys.find(k =>
-          k.toLowerCase().startsWith('id_insumo') ||
-          k.toLowerCase() === 'codigo' ||
-          k.toLowerCase() === 'codigo_insumo' ||
-          k.toLowerCase() === 'insumo_id' ||
-          k.toLowerCase() === 'id'
-        );
-        const codigo = idKey ? row[idKey] : (row.codigo || row.id_insumo || '');
-
-        // name_insumo_ o similar
-        const descKey = keys.find(k =>
-          k.toLowerCase().startsWith('name_insumo') ||
-          k.toLowerCase() === 'descripcion' ||
-          k.toLowerCase() === 'nombre' ||
-          k.toLowerCase() === 'nombre_insumo' ||
-          k.toLowerCase() === 'description'
-        );
-        const descripcion = descKey ? row[descKey] : (row.descripcion || row.nombre || '');
-
-        // unidad_ o similar
-        const unitKey = keys.find(k =>
-          k.toLowerCase().startsWith('unidad') ||
-          k.toLowerCase() === 'u' ||
-          k.toLowerCase() === 'medida' ||
-          k.toLowerCase() === 'unidad_medida'
-        );
-        const unidad = unitKey ? row[unitKey] : (row.unidad || row.unid || 'u');
-
-        // cantidad_ o similar
-        const cantKey = keys.find(k =>
-          k.toLowerCase().startsWith('cantidad') ||
-          k.toLowerCase() === 'coeficiente' ||
-          k.toLowerCase() === 'rendimiento' ||
-          k.toLowerCase() === 'cant'
-        );
-        const cantidadVal = cantKey ? parseFloat(row[cantKey]) : 1;
-        const cantidad = isNaN(cantidadVal) ? 1 : cantidadVal;
-
-        // Búsqueda específica de precio_unitario_mat, etc. de las tablas RECETA_MAT, etc.
-        let databasePrecioUnitario = 0;
-        let databasePrecioReceta = 0;
-
-        const pUnitKey = keys.find(k =>
-          k.toLowerCase().startsWith('precio_unitario') ||
-          k.toLowerCase() === 'precio_insumo' ||
-          k.toLowerCase() === 'precio' ||
-          k.toLowerCase() === 'costo'
-        );
-        if (pUnitKey) {
-          databasePrecioUnitario = parseFloat(row[pUnitKey]) || 0;
-        }
-
-        const pRecetaKey = keys.find(k =>
-          k.toLowerCase().startsWith('precio_receta_') ||
-          k.toLowerCase().startsWith('precio_total_') ||
-          k.toLowerCase() === 'precio_receta' ||
-          k.toLowerCase() === 'precio_total' ||
-          k.toLowerCase() === 'subtotal' ||
-          k.toLowerCase() === 'total' ||
-          k.toLowerCase() === 'precio_parcial' ||
-          k.toLowerCase() === 'parcial'
-        );
-        if (pRecetaKey) {
-          databasePrecioReceta = parseFloat(row[pRecetaKey]) || 0;
-        }
-
-        // BÚSQUEDA DEL INSUMO EN LAS TABLAS INSUMOS_MAT, ETC. PARA OBTENER LA UNIDAD Y PRECIO ACTUALIZADOS LIVE
-        let resolvedDescription = String(descripcion || '');
-        let resolvedUnidad = String(unidad || 'u');
-
-        let resolvedPrecioUnitario = databasePrecioUnitario;
-        let hasInsumoMatch = false;
-
-        const lookupId = String(codigo || '').trim().toLowerCase();
-        if (lookupId) {
-          let guessedCat = cat;
-          if (!guessedCat) {
-            const upCod = lookupId.toUpperCase();
-            if (upCod.startsWith('MAT-') || row.id_insumo_mat || 'id_insumo_mat' in row) {
-              guessedCat = 'MAT';
-            } else if (upCod.startsWith('MOB-') || upCod.startsWith('MO-') || row.id_insumo_mob || 'id_insumo_mob' in row) {
-              guessedCat = 'MOB';
-            } else if (upCod.startsWith('EYH-') || upCod.startsWith('EQ-') || row.id_insumo_eyh || 'id_insumo_eyh' in row) {
-              guessedCat = 'EYH';
-            } else if (upCod.startsWith('TRN-') || upCod.startsWith('TR-') || row.id_insumo_transp || 'id_insumo_transp' in row) {
-              guessedCat = 'TRANSP';
-            }
-          }
-
-          if (guessedCat === 'MAT') {
-            const match = insumosMat.find(i =>
-              String(i.id_insumo_mat || i.id || '').trim().toLowerCase() === lookupId
-            );
-            if (match) {
-              hasInsumoMatch = true;
-              resolvedDescription = match.name_insumo_mat || match.nombre || resolvedDescription;
-              resolvedUnidad = match.unidad_mat || match.unidad || resolvedUnidad;
-              const rawPrice = match.precio_mat !== undefined ? match.precio_mat : match.precio_insumo_mat;
-              const matchPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice);
-              if (matchPrice !== undefined && !isNaN(matchPrice)) {
-                resolvedPrecioUnitario = matchPrice;
-              }
-            }
-          } else if (guessedCat === 'MOB') {
-            const match = insumosMob.find(i =>
-              String(i.id_insumo_mob || i.id || '').trim().toLowerCase() === lookupId
-            );
-            if (match) {
-              hasInsumoMatch = true;
-              resolvedDescription = match.name_insumo_mob || match.nombre || resolvedDescription;
-              resolvedUnidad = match.unidad_mob || match.unidad || resolvedUnidad;
-              const rawPrice = match.precio_mob !== undefined ? match.precio_mob : match.precio_insumo_mob;
-              const matchPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice);
-              if (matchPrice !== undefined && !isNaN(matchPrice)) {
-                resolvedPrecioUnitario = matchPrice;
-              }
-            }
-          } else if (guessedCat === 'EYH') {
-            const match = insumosEyh.find(i =>
-              String(i.id_insumo_eyh || i.id || '').trim().toLowerCase() === lookupId
-            );
-            if (match) {
-              hasInsumoMatch = true;
-              resolvedDescription = match.name_insumo_eyh || match.nombre || resolvedDescription;
-              resolvedUnidad = match.unidad_eyh || match.unidad || resolvedUnidad;
-              const rawPrice = match.precio_eyh !== undefined ? match.precio_eyh : match.precio_insumo_eyh;
-              const matchPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice);
-              if (matchPrice !== undefined && !isNaN(matchPrice)) {
-                resolvedPrecioUnitario = matchPrice;
-              }
-            }
-          } else if (guessedCat === 'TRANSP') {
-            const match = insumosTransp.find(i =>
-              String(i.id_insumo_transp || i.id || '').trim().toLowerCase() === lookupId
-            );
-            if (match) {
-              hasInsumoMatch = true;
-              resolvedDescription = match.name_insumo_transp || match.nombre || resolvedDescription;
-              resolvedUnidad = match.unidad_transp || match.unidad || resolvedUnidad;
-              const rawPrice = match.precio_transp !== undefined ? match.precio_transp : match.precio_insumo_transp;
-              const matchPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice);
-              if (matchPrice !== undefined && !isNaN(matchPrice)) {
-                resolvedPrecioUnitario = matchPrice;
-              }
-            }
-          }
-        }
-
-        const resolvedPrecioTotal = databasePrecioReceta || (resolvedPrecioUnitario * cantidad);
-
-        return {
-          id_rubro: item.id_rubro || item.id || '',
-          codigo: String(codigo || ''),
-          descripcion: resolvedDescription,
-          unidad: resolvedUnidad,
-          amount: cantidad,
-          cantidad,
-          precio_unitario: resolvedPrecioUnitario || databasePrecioUnitario,
-          precio_total: resolvedPrecioTotal,
-          _tablaOrigen: tablaOrigen,
-          _originalRow: row,
-        };
-      };
-
-      let dataMat = (rM || []).map(row => normalizarFilaReceta(row, 'MAT', rMResult.table));
-      let dataMob = (rO || []).map(row => normalizarFilaReceta(row, 'MOB', rOResult.table));
-      let dataEyh = (rE || []).map(row => normalizarFilaReceta(row, 'EYH', rEResult.table));
-      let dataTransp = (rT || []).map(row => normalizarFilaReceta(row, 'TRANSP', rTResult.table));
-
-      // Fallback a tabla unificada "RECETA" o "RECETAS" de Supabase si los resultados específicos están vacíos
-      if (dataMat.length === 0 && dataMob.length === 0 && dataEyh.length === 0 && dataTransp.length === 0) {
-        let unifiedRows: any[] = [];
-        let unifiedTable = 'RECETA';
-        try {
-          const { data } = await supabase.from('RECETA').select('*').eq('id_rubro', id);
-          if (data && data.length > 0) {
-            unifiedRows = data;
-            unifiedTable = 'RECETA';
-          }
-        } catch (e) { }
-
-        if (unifiedRows.length === 0) {
-          try {
-            const { data } = await supabase.from('RECETA').select('*').eq('rubro_id', id);
-            if (data && data.length > 0) {
-              unifiedRows = data;
-              unifiedTable = 'RECETA';
-            }
-          } catch (e) { }
-        }
-
-        if (unifiedRows.length === 0) {
-          try {
-            const { data } = await supabase.from('RECETAS').select('*').eq('id_rubro', id);
-            if (data && data.length > 0) {
-              unifiedRows = data;
-              unifiedTable = 'RECETAS';
-            }
-          } catch (e) { }
-        }
-
-        if (unifiedRows.length > 0) {
-          unifiedRows.forEach((row: any) => {
-            const t = (row.tipo || row.categoria || row.tipo_insumo || row.grupo || row.tabla || '').toString().toUpperCase();
-            let cat = 'MAT';
-            const normCod = String(row.codigo || row.id_insumo || '').toString().toUpperCase();
-            if (t.includes('MAT') || t.includes('MATERIAL') || normCod.startsWith('MAT-')) {
-              cat = 'MAT';
-            } else if (t.includes('MOB') || t.includes('MANO') || t.includes('OPER') || t.includes('OBRA') || t.includes('TRABAJ') || normCod.startsWith('MOB-') || normCod.startsWith('MO-')) {
-              cat = 'MOB';
-            } else if (t.includes('EYH') || t.includes('EQU') || t.includes('MAQ') || t.includes('HERR') || normCod.startsWith('EYH-') || normCod.startsWith('EQ-')) {
-              cat = 'EYH';
-            } else if (t.includes('TRA') || t.includes('FLE') || normCod.startsWith('TRN-') || normCod.startsWith('TR-')) {
-              cat = 'TRANSP';
-            }
-
-            const normalized = normalizarFilaReceta(row, cat, unifiedTable);
-            if (cat === 'MAT') {
-              dataMat.push(normalized);
-            } else if (cat === 'MOB') {
-              dataMob.push(normalized);
-            } else if (cat === 'EYH') {
-              dataEyh.push(normalized);
-            } else if (cat === 'TRANSP') {
-              dataTransp.push(normalized);
-            }
-          });
-        }
-      }
-      setRecetaMat(dataMat);
-      setRecetaMob(dataMob);
-      setRecetaEyh(dataEyh);
-      setRecetaTransp(dataTransp);
-
-      // Recalcular el total compuesto del rubro y guardarlo en la base de datos
-      const totalReceta = [...dataMat, ...dataMob, ...dataEyh, ...dataTransp].reduce(
-        (sum, row) => sum + (Number(row.precio_total) || 0),
-        0
-      );
-
-      const oldPrecio = Number(item.precio_rubro || 0);
-      if (Math.abs(totalReceta - oldPrecio) > 0.001) {
-        console.log(`Sincronizando precio de rubro ${id}: de $${oldPrecio} a $${totalReceta}`);
-        await supabase
-          .from('RUBROS')
-          .update({ precio_rubro: totalReceta })
-          .eq('id_rubro', id);
-
-        // Actualizar el estado local para evitar inconsistencias visuales
-        setTodosLosRubros((prev) =>
-          prev.map((r) =>
-            r.id_rubro === id || r.id === id ? { ...r, precio_rubro: totalReceta } : r
-          )
-        );
+        setRecetaMat(mat);
+        setRecetaMob(mob);
+        setRecetaEyh(eyh);
+        setRecetaTransp(transp);
       }
     } catch (err) {
-      console.error(err);
+      console.error('Error al obtener receta APU:', err);
       mostrarToast('Error al obtener la estructura del análisis.', 'error');
     } finally {
       setCargandoReceta(false);
@@ -638,386 +590,261 @@ export default function App() {
       return;
     }
 
-    // Auto-detectar la tabla correspondiente en Supabase basándonos en las columnas del insumo o categoría activa
-    let tabla = '';
-    if ('id_insumo_mat' in item || 'name_insumo_mat' in item || 'precio_insumo_mat' in item) {
-      tabla = 'INSUMOS_MAT';
-    } else if ('id_insumo_mob' in item || 'name_insumo_mob' in item || 'precio_insumo_mob' in item) {
-      tabla = 'INSUMOS_MOB';
-    } else if ('id_insumo_eyh' in item || 'name_insumo_eyh' in item || 'precio_insumo_eyh' in item) {
-      tabla = 'INSUMOS_EYH';
-    } else if ('id_insumo_transp' in item || 'name_insumo_transp' in item || 'precio_insumo_transp' in item) {
-      tabla = 'INSUMOS_TRANSP';
-    } else {
-      const tablaMap: Record<string, string> = {
-        MAT: 'INSUMOS_MAT',
-        MOB: 'INSUMOS_MOB',
-        EYH: 'INSUMOS_EYH',
-        TRANSP: 'INSUMOS_TRANSP',
-      };
-      tabla = tablaMap[categoriaAbierta || ''] || '';
-    }
-
-    if (!tabla) {
-      mostrarToast('Error interno: Tabla de destino no determinada para este insumo.', 'error');
+    const insumoId = item.id || item.id_insumo_mat || item.id_insumo_mob || item.id_insumo_eyh || item.id_insumo_transp;
+    if (!insumoId) {
+      mostrarToast('Error interno: Identificador del insumo no hallado.', 'error');
       return;
     }
 
-    // Identificar el mejor ID col (preferir ID absoluto en base de datos si existe)
-    let idCol = 'id';
-    if (tabla === 'INSUMOS_MAT' && 'id_insumo_mat' in item) {
-      idCol = 'id_insumo_mat';
-    } else if (tabla === 'INSUMOS_MOB' && 'id_insumo_mob' in item) {
-      idCol = 'id_insumo_mob';
-    } else if (tabla === 'INSUMOS_EYH' && 'id_insumo_eyh' in item) {
-      idCol = 'id_insumo_eyh';
-    } else if (tabla === 'INSUMOS_TRANSP' && 'id_insumo_transp' in item) {
-      idCol = 'id_insumo_transp';
-    } else if (item.id) {
-      idCol = 'id';
-    } else if (item.id_insumo_mat) {
-      idCol = 'id_insumo_mat';
-    } else if (item.id_insumo_mob) {
-      idCol = 'id_insumo_mob';
-    } else if (item.id_insumo_eyh) {
-      idCol = 'id_insumo_eyh';
-    } else if (item.id_insumo_transp) {
-      idCol = 'id_insumo_transp';
-    } else if (item.id_insumo) {
-      idCol = 'id_insumo';
-    }
-
-    const idRow = item[idCol];
-    if (!idRow) {
-      mostrarToast('Error interno: Identificador principal no hallado.', 'error');
-      return;
-    }
-
-    // Clonar y limpiar el payload
-    const payload = { ...tempEdit };
-
-    // Eliminar IDs principales y campos del sistema para evitar errores de restricción SQL
-    delete payload.id;
-    delete payload.id_insumo_mat;
-    delete payload.id_insumo_mob;
-    delete payload.id_insumo_eyh;
-    delete payload.id_insumo_transp;
-    delete payload.id_insumo;
-    delete payload.created_at;
-    delete payload.updated_at;
-
-    // Eliminar cualquier tipo complejo u objetos no planos del frontend
-    Object.keys(payload).forEach((key) => {
-      if (payload[key] !== null && (typeof payload[key] === 'object' || Array.isArray(payload[key]))) {
-        delete payload[key];
-      }
-    });
-
-    console.log('Intentando actualizar insumo en Supabase:', {
-      tabla,
-      idCol,
-      idRow,
-      payload
-    });
+    const nuevoNombre = tempEdit.name_insumo_mat || tempEdit.name_insumo_mob || tempEdit.name_insumo_eyh || tempEdit.name_insumo_transp || tempEdit.nombre;
+    const nuevoPrecio = tempEdit.precio_insumo_mat || tempEdit.precio_insumo_mob || tempEdit.precio_insumo_eyh || tempEdit.precio_insumo_transp || tempEdit.precio || tempEdit.precio_unitario;
+    const nuevaUnidad = tempEdit.unidad_insumo_mat || tempEdit.unidad_insumo_mob || tempEdit.unidad_insumo_eyh || tempEdit.unidad_insumo_transp || tempEdit.unidad;
 
     try {
-      const { error } = await supabase.from(tabla).update(payload).eq(idCol, idRow);
-      if (error) {
-        console.error('Error detallado de Supabase al actualizar:', error);
-        let mensajeAyuda = '';
-        if (error.message?.toLowerCase().includes('policy') || error.code === '42501') {
-          mensajeAyuda = `\n\n💡 Causa probable: Row Level Security (RLS) o Privilegios. Aunque desactivaras el RLS para materiales, comprueba si necesitas desactivarlo para "${tabla}".\n\nEjecuta esto en el SQL Editor de Supabase:\nALTER TABLE "${tabla}" DISABLE ROW LEVEL SECURITY;\nGRANT ALL ON TABLE "${tabla}" TO anon, authenticated;`;
-        } else if (error.message?.toLowerCase().includes('column') || error.code === '42703') {
-          mensajeAyuda = `\n\n💡 Causa probable: Estás enviando columnas que no existen en "${tabla}". Comprueba las columnas del payload impreso en la consola Web del navegador.`;
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
+
+        if (esDuenoOAdmin || puedeEditarProyecto) {
+          // Actualización directa del insumo en el catálogo
+          const { error } = await client
+            .from('insumos')
+            .update({
+              nombre: nuevoNombre,
+              precio_unitario: Number(nuevoPrecio),
+              unidad: nuevaUnidad,
+            })
+            .eq('id', insumoId);
+
+          if (error) throw error;
+          mostrarToast('Insumo actualizado correctamente en el catálogo.', 'success');
+        } else {
+          // Crear un borrador de sugerencia de precio para aprobación
+          const { error } = await client
+            .from('borradores_insumo')
+            .insert({
+              catalogo_id: item.catalogo_id,
+              insumo_id: insumoId,
+              categoria: item.categoria || 'materiales',
+              nombre: nuevoNombre,
+              nuevo_precio: Number(nuevoPrecio),
+              unidad: nuevaUnidad,
+              estado: 'pendiente',
+              solicitado_por: usuario?.id || null,
+            });
+
+          if (error) throw error;
+          mostrarToast('Propuesta de precio enviada a la bandeja de aprobación.', 'info');
         }
 
-        mostrarToast(
-          `Fallo al actualizar [Código: ${error.code || 'S/C'}]: ${error.message}` +
-          (error.details ? `\nDetalles: ${error.details}` : '') +
-          (error.hint ? `\nSugerencia: ${error.hint}` : '') +
-          mensajeAyuda,
-          'error'
-        );
-        return;
+        setInsumoSeleccionado({ ...insumoSeleccionado, ...tempEdit });
+        setEditando(false);
+        await cargarDatos();
       }
-      setInsumoSeleccionado({ ...insumoSeleccionado, ...tempEdit });
-      setEditando(false);
-      mostrarToast('Registro de insumo actualizado correctamente.', 'success');
-      await cargarDatos();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Excepción en guardarCambios:', err);
-      mostrarToast('Pérdida de conexión durante el proceso de guardado.', 'error');
+      const msg = err instanceof Error ? err.message : 'Error al guardar insumo';
+      mostrarToast(`Fallo al actualizar insumo: ${msg}`, 'error');
     }
   };
 
-  // ── GESTIÓN DE RUBROS Y RECETAS (CONEXIÓN BD) ──────────────────────────────────
+  // ── GESTIÓN DE RUBROS Y RECETAS (CONEXIÓN BD SUPABASE) ──────────────────────────
   const crearRubro = async (nombre: string, unidad: string) => {
     try {
-      const nuevoId = typeof crypto !== 'undefined' && crypto.randomUUID 
-        ? crypto.randomUUID() 
-        : `rub-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-      
-      console.log('Intentando crear nuevo rubro en Supabase:', { nuevoId, nombre, unidad });
-      
-      const { data, error } = await supabase
-        .from('RUBROS')
-        .insert({
-          id_rubro: nuevoId,
-          nombre_rubro: nombre,
-          unidad_rubro: unidad,
-          precio_rubro: 0,
-          proyecto_origen: 'Creado manualmente'
-        })
-        .select();
-
-      if (error) {
-        throw error;
+      if (!organizacionActiva) {
+        mostrarToast('Debes tener una constructora activa para crear rubros.', 'error');
+        return;
       }
 
-      mostrarToast('Rubro creado correctamente.', 'success');
-      await cargarDatos();
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
+        const codigoRubro = `RUB-${Date.now().toString().slice(-4)}`;
 
-      const creado = data && (Array.isArray(data) ? data[0] : data);
-      const rubroObj = creado || {
-        id_rubro: nuevoId,
-        nombre_rubro: nombre,
-        unidad_rubro: unidad,
-        unidad: unidad,
-        precio_rubro: 0
-      };
+        const { data: newRubro, error } = await client
+          .from('rubros')
+          .insert({
+            organizacion_id: organizacionActiva.id,
+            proyecto_id: proyectoActivo?.id || null,
+            codigo_rubro: codigoRubro,
+            nombre: nombre.trim(),
+            unidad: unidad.trim(),
+            rendimiento: 1.0,
+            created_by: usuario?.id || null,
+          })
+          .select()
+          .single();
 
-      const u = rubroObj.unidad_rubro || rubroObj.unidad || 'm³';
-      const rubroNormalizado = {
-        ...rubroObj,
-        id_rubro: rubroObj.id_rubro || nuevoId,
-        unidad: u,
-        unidad_rubro: u
-      };
+        if (error) throw error;
 
-      setRubroSeleccionado(rubroNormalizado);
-      await cargarReceta(rubroNormalizado);
-      return rubroNormalizado;
-    } catch (err: any) {
+        mostrarToast(`¡Rubro "${newRubro.nombre}" creado exitosamente!`, 'success');
+        await cargarDatos();
+
+        const rubroNormalizado = {
+          ...newRubro,
+          id_rubro: newRubro.id,
+          nombre_rubro: newRubro.nombre,
+          unidad_rubro: newRubro.unidad,
+          precio_rubro: Number(newRubro.precio_unitario || 0),
+        };
+
+        setRubroSeleccionado(rubroNormalizado);
+        await cargarReceta(rubroNormalizado);
+        return rubroNormalizado;
+      }
+    } catch (err: unknown) {
       console.error('Error al crear rubro:', err);
-      mostrarToast(`No se pudo crear el rubro: ${err.message || err}`, 'error');
+      const msg = err instanceof Error ? err.message : 'No se pudo crear el rubro';
+      mostrarToast(`No se pudo crear el rubro: ${msg}`, 'error');
       throw err;
     }
   };
 
   const actualizarRubro = async (idRubro: string, nuevoNombre: string, nuevaUnidad: string) => {
     try {
-      console.log('Intentando actualizar rubro en Supabase:', { idRubro, nuevoNombre, nuevaUnidad });
-      const { error } = await supabase
-        .from('RUBROS')
-        .update({
-          nombre_rubro: nuevoNombre,
-          unidad_rubro: nuevaUnidad
-        })
-        .eq('id_rubro', idRubro);
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
+        const { error } = await client
+          .from('rubros')
+          .update({
+            nombre: nuevoNombre.trim(),
+            unidad: nuevaUnidad.trim(),
+          })
+          .eq('id', idRubro);
 
-      if (error) {
-        throw error;
-      }
+        if (error) throw error;
 
-      mostrarToast('Rubro actualizado correctamente.', 'success');
-      if (rubroSeleccionado && (rubroSeleccionado.id_rubro === idRubro || rubroSeleccionado.id === idRubro)) {
-        setRubroSeleccionado({
-          ...rubroSeleccionado,
-          nombre_rubro: nuevoNombre,
-          unidad_rubro: nuevaUnidad,
-          unidad: nuevaUnidad
-        });
+        mostrarToast('Rubro actualizado correctamente.', 'success');
+        if (rubroSeleccionado && (rubroSeleccionado.id_rubro === idRubro || rubroSeleccionado.id === idRubro)) {
+          setRubroSeleccionado({
+            ...rubroSeleccionado,
+            nombre: nuevoNombre.trim(),
+            nombre_rubro: nuevoNombre.trim(),
+            unidad: nuevaUnidad.trim(),
+            unidad_rubro: nuevaUnidad.trim(),
+          });
+        }
+        await cargarDatos();
       }
-      await cargarDatos();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error al actualizar rubro:', err);
-      mostrarToast(`No se pudo actualizar el rubro: ${err.message || err}`, 'error');
+      const msg = err instanceof Error ? err.message : 'Error al actualizar rubro';
+      mostrarToast(`No se pudo actualizar el rubro: ${msg}`, 'error');
     }
   };
 
-  const actualizarCantidadReceta = async (idRubro: string, row: any, nuevaCantidad: number) => {
+  const actualizarComponenteReceta = async (
+    idRubro: string,
+    row: any,
+    valores: { cantidad: number; rendimiento?: number; distancia?: number }
+  ) => {
     try {
-      const orig = row._originalRow;
-      if (!orig || !row._tablaOrigen) {
-        mostrarToast('Error interno: No se hallaron metadatos del registro original.', 'error');
-        return;
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
+        const rowId = row.id || row._originalRow?.id;
+        if (!rowId) throw new Error('Identificador de insumo en receta no hallado.');
+
+        // Actualizar en rubro_insumos (el trigger recalcular_rubro_trigger actualiza el rubro en BD)
+        const { error } = await client
+          .from('rubro_insumos')
+          .update({
+            cantidad: Number(valores.cantidad || 0),
+            rendimiento: Number(valores.rendimiento ?? 1.0),
+            distancia: Number(valores.distancia ?? 0.0),
+          })
+          .eq('id', rowId);
+
+        if (error) throw error;
+
+        mostrarToast('Cantidad de receta actualizada.', 'success');
+        await cargarDatos();
+        if (rubroSeleccionado) {
+          await cargarReceta(rubroSeleccionado);
+        }
       }
-
-      const keys = Object.keys(orig);
-      const cantKey = keys.find(k =>
-        k.toLowerCase().startsWith('cantidad') ||
-        k.toLowerCase() === 'coeficiente' ||
-        k.toLowerCase() === 'rendimiento' ||
-        k.toLowerCase() === 'cant'
-      ) || 'cantidad_';
-
-      const rubroIdKey = keys.find(k =>
-        k.toLowerCase() === 'id_rubro' ||
-        k.toLowerCase() === 'rubro_id' ||
-        k.toLowerCase() === 'id_rubro_presup' ||
-        k.toLowerCase() === 'id'
-      ) || 'id_rubro';
-
-      const insumoIdKey = keys.find(k =>
-        k.toLowerCase().startsWith('id_insumo') ||
-        k.toLowerCase() === 'codigo' ||
-        k.toLowerCase() === 'codigo_insumo' ||
-        k.toLowerCase() === 'insumo_id' ||
-        k.toLowerCase() === 'id'
-      ) || 'id_insumo_';
-
-      console.log('Actualizando cantidad en receta:', {
-        tabla: row._tablaOrigen,
-        [cantKey]: nuevaCantidad,
-        [rubroIdKey]: orig[rubroIdKey],
-        [insumoIdKey]: orig[insumoIdKey]
-      });
-
-      const { error } = await supabase
-        .from(row._tablaOrigen)
-        .update({ [cantKey]: nuevaCantidad })
-        .eq(rubroIdKey, orig[rubroIdKey])
-        .eq(insumoIdKey, orig[insumoIdKey]);
-
-      if (error) {
-        throw error;
-      }
-
-      mostrarToast('Cantidad actualizada correctamente.', 'success');
-      await cargarDatos();
-      if (rubroSeleccionado) {
-        await cargarReceta(rubroSeleccionado);
-      }
-    } catch (err: any) {
-      console.error('Error al actualizar cantidad en receta:', err);
-      mostrarToast(`No se pudo actualizar la cantidad: ${err.message || err}`, 'error');
+    } catch (err: unknown) {
+      console.error('Error al actualizar componente en receta:', err);
+      const msg = err instanceof Error ? err.message : 'Error al actualizar';
+      mostrarToast(`No se pudo actualizar el componente: ${msg}`, 'error');
     }
   };
 
   const eliminarInsumoReceta = async (idRubro: string, row: any) => {
     try {
-      const orig = row._originalRow;
-      if (!orig || !row._tablaOrigen) {
-        mostrarToast('Error interno: No se hallaron metadatos del registro original.', 'error');
-        return;
-      }
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
+        const rowId = row.id || row._originalRow?.id;
+        if (!rowId) throw new Error('Identificador del insumo no hallado.');
 
-      const keys = Object.keys(orig);
-      const rubroIdKey = keys.find(k =>
-        k.toLowerCase() === 'id_rubro' ||
-        k.toLowerCase() === 'rubro_id' ||
-        k.toLowerCase() === 'id_rubro_presup' ||
-        k.toLowerCase() === 'id'
-      ) || 'id_rubro';
+        const { error } = await client
+          .from('rubro_insumos')
+          .delete()
+          .eq('id', rowId);
 
-      const insumoIdKey = keys.find(k =>
-        k.toLowerCase().startsWith('id_insumo') ||
-        k.toLowerCase() === 'codigo' ||
-        k.toLowerCase() === 'codigo_insumo' ||
-        k.toLowerCase() === 'insumo_id' ||
-        k.toLowerCase() === 'id'
-      ) || 'id_insumo_';
+        if (error) throw error;
 
-      console.log('Eliminando insumo de la receta:', {
-        tabla: row._tablaOrigen,
-        [rubroIdKey]: orig[rubroIdKey],
-        [insumoIdKey]: orig[insumoIdKey]
-      });
-
-      const { error } = await supabase
-        .from(row._tablaOrigen)
-        .delete()
-        .eq(rubroIdKey, orig[rubroIdKey])
-        .eq(insumoIdKey, orig[insumoIdKey]);
-
-      if (error) {
-        console.error('Error detallado de Supabase al eliminar:', error);
-        let mensajeAyuda = '';
-        if (error.message?.toLowerCase().includes('policy') || error.code === '42501') {
-          mensajeAyuda = `\n\n💡 Causa probable: Row Level Security (RLS) o Privilegios. Ejecuta esto en el SQL Editor de Supabase:\nALTER TABLE "${row._tablaOrigen}" DISABLE ROW LEVEL SECURITY;\nGRANT ALL ON TABLE "${row._tablaOrigen}" TO anon, authenticated;`;
+        mostrarToast('Insumo eliminado de la receta.', 'success');
+        await cargarDatos();
+        if (rubroSeleccionado) {
+          await cargarReceta(rubroSeleccionado);
         }
-        mostrarToast(`Fallo al eliminar [Código: ${error.code || 'S/C'}]: ${error.message}${mensajeAyuda}`, 'error');
-        return;
       }
-
-      mostrarToast('Insumo eliminado de la receta.', 'success');
-      await cargarDatos();
-      if (rubroSeleccionado) {
-        await cargarReceta(rubroSeleccionado);
-      }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error al eliminar insumo de la receta:', err);
-      mostrarToast(`No se pudo eliminar el insumo: ${err.message || err}`, 'error');
+      const msg = err instanceof Error ? err.message : 'Error al eliminar insumo';
+      mostrarToast(`No se pudo eliminar el insumo: ${msg}`, 'error');
     }
   };
 
   const agregarInsumoReceta = async (idRubro: string, insumo: any, catKey: string, cantidad: number) => {
     try {
-      let tablaDestino = '';
+      if (isLiveSupabase) {
+        const client = getSupabaseClient();
 
-      const todasLasFilas = [...recetaMat, ...recetaMob, ...recetaEyh, ...recetaTransp];
-      const algunaFilaMismaCat = todasLasFilas.find(r => r._tablaOrigen);
-      if (algunaFilaMismaCat && algunaFilaMismaCat._tablaOrigen) {
-        const to = algunaFilaMismaCat._tablaOrigen.toUpperCase();
-        if (to === 'RECETA' || to === 'RECETAS') {
-          tablaDestino = to;
+        const catMap: Record<string, 'materiales' | 'mano_de_obra' | 'equipos_herramientas' | 'transporte'> = {
+          MAT: 'materiales',
+          materiales: 'materiales',
+          MOB: 'mano_de_obra',
+          mano_de_obra: 'mano_de_obra',
+          EYH: 'equipos_herramientas',
+          equipos_herramientas: 'equipos_herramientas',
+          TRANSP: 'transporte',
+          transporte: 'transporte',
+        };
+        const categoriaDb = catMap[catKey] || 'materiales';
+
+        const idInsumo = insumo.id || insumo.id_insumo_mat || insumo.id_insumo_mob || insumo.id_insumo_eyh || insumo.id_insumo_transp;
+        const nombreInsumo = insumo.nombre || insumo.name_insumo_mat || insumo.name_insumo_mob || insumo.name_insumo_eyh || insumo.name_insumo_transp || '';
+        const unidadInsumo = insumo.unidad || insumo.unidad_insumo_mat || 'u';
+        const precioUnitario = Number(insumo.precio_unitario || insumo.precio_insumo_mat || insumo.precio_insumo_mob || insumo.precio_insumo_eyh || insumo.precio_insumo_transp || insumo.precio || 0);
+
+        const { error } = await client
+          .from('rubro_insumos')
+          .insert({
+            rubro_id: idRubro,
+            insumo_id: idInsumo || null,
+            categoria: categoriaDb,
+            codigo_insumo: insumo.codigo || null,
+            nombre_insumo: nombreInsumo,
+            unidad_insumo: unidadInsumo,
+            precio_unitario: precioUnitario,
+            cantidad: Number(cantidad || 1),
+            rendimiento: 1.0,
+            distancia: 0.0,
+            es_porcentaje: !!insumo.es_porcentaje,
+            porcentaje: Number(insumo.porcentaje || 0),
+          });
+
+        if (error) throw error;
+
+        mostrarToast('Insumo añadido al análisis de precio unitario.', 'success');
+        await cargarDatos();
+        if (rubroSeleccionado) {
+          await cargarReceta(rubroSeleccionado);
         }
       }
-
-      if (!tablaDestino) {
-        const tablaMap: Record<string, string> = {
-          MAT: 'RECETA_MAT',
-          MOB: 'RECETA_MOB',
-          EYH: 'RECETA_EYH',
-          TRANSP: 'RECETA_TRANSP',
-        };
-        tablaDestino = tablaMap[catKey] || 'RECETA_MAT';
-      }
-
-      const idInsumo = insumo.id_insumo_mat || insumo.id_insumo_mob || insumo.id_insumo_eyh || insumo.id_insumo_transp || insumo.id || insumo.id_insumo;
-      const nombreInsumo = insumo.name_insumo_mat || insumo.name_insumo_mob || insumo.name_insumo_eyh || insumo.name_insumo_transp || insumo.nombre || insumo.descripcion || '';
-      const unidadInsumo = insumo.unidad || insumo.unidad_mat || insumo.unidad_mob || insumo.unidad_eyh || insumo.unidad_transp || 'u';
-      const precioUnitario = insumo.precio_mat || insumo.precio_mob || insumo.precio_eyh || insumo.precio_transp || insumo.precio_insumo_mat || insumo.precio_insumo_mob || insumo.precio_insumo_eyh || insumo.precio_insumo_transp || insumo.precio || 0;
-
-      const esTablaUnificada = tablaDestino === 'RECETA' || tablaDestino === 'RECETAS';
-
-      const payload: any = {};
-      if (esTablaUnificada) {
-        payload.id_rubro = idRubro;
-        payload.rubro_id = idRubro;
-        payload.codigo = idInsumo;
-        payload.id_insumo = idInsumo;
-        payload.descripcion = nombreInsumo;
-        payload.unidad = unidadInsumo;
-        payload.cantidad = cantidad;
-        payload.precio_unitario = precioUnitario;
-        payload.tipo = catKey;
-      } else {
-        payload.id_rubro = idRubro;
-        payload.id_insumo_ = idInsumo;
-        payload.name_insumo_ = nombreInsumo;
-        payload.cantidad_ = cantidad;
-        payload.precio_unitario_ = precioUnitario;
-      }
-
-      console.log('Insertando nuevo insumo en receta:', { tabla: tablaDestino, payload });
-
-      const { error } = await supabase
-        .from(tablaDestino)
-        .insert(payload);
-
-      if (error) {
-        throw error;
-      }
-
-      mostrarToast('Insumo añadido a la receta correctamente.', 'success');
-      await cargarDatos();
-      if (rubroSeleccionado) {
-        await cargarReceta(rubroSeleccionado);
-      }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error al agregar insumo a la receta:', err);
-      mostrarToast(`No se pudo añadir el insumo: ${err.message || err}`, 'error');
+      const msg = err instanceof Error ? err.message : 'Error al agregar insumo';
+      mostrarToast(`No se pudo añadir el insumo: ${msg}`, 'error');
     }
   };
 
@@ -1126,273 +953,41 @@ export default function App() {
     setCargandoReceta(true);
     setApuAuditor({ id_rubro: idRubro, mat: [], mob: [], eyh: [], transp: [] });
     try {
-      // Función resiliente para consultar diferentes variaciones de tablas, ortografía y columnas de ID
-      const queryCategory = async (primaryTable: string, fallbackTable: string) => {
-        const tableOpts = [
-          primaryTable,
-          primaryTable.toLowerCase(),
-          fallbackTable,
-          fallbackTable.toLowerCase()
-        ];
-        const columnOpts = ['id_rubro', 'rubro_id', 'id_rubro_presup', 'id'];
-        const idOptions = [idRubro].filter(Boolean);
+      const client = getSupabaseClient();
+      const { data: rows, error } = await client
+        .from('rubro_insumos')
+        .select('*')
+        .eq('rubro_id', idRubro)
+        .order('created_at', { ascending: true });
 
-        for (const table of tableOpts) {
-          for (const col of columnOpts) {
-            for (const idVal of idOptions) {
-              try {
-                const { data, error } = await supabase.from(table).select('*').eq(col, idVal);
-                if (!error && data && data.length > 0) {
-                  return data;
-                }
-              } catch (err) {
-                // Siguiente combinación
-              }
-            }
-          }
-        }
-        return [];
-      };
+      if (error) throw error;
 
-      const [rM, rO, rE, rT] = await Promise.all([
-        queryCategory('RECETA_MAT', 'receta_mat'),
-        queryCategory('RECETA_MOB', 'receta_mob'),
-        queryCategory('RECETA_EYH', 'receta_eyh'),
-        queryCategory('RECETA_TRANSP', 'RECETA_TRASNP')
-      ]);
+      const normalizarFilaReceta = (r: any) => ({
+        id: r.id,
+        codigo: r.codigo_insumo || '',
+        descripcion: r.nombre_insumo || '',
+        unidad: r.unidad_insumo || 'u',
+        amount: Number(r.cantidad || 0),
+        cantidad: Number(r.cantidad || 0),
+        precio_unitario: Number(r.precio_unitario || 0),
+        precio_total: Number(r.subtotal || 0),
+      });
 
-      // Normalizador para asegurar la compatibilidad con las especificaciones de columnas del frontend
-      const normalizarFilaReceta = (row: any, cat?: string) => {
-        if (!row) return { codigo: '', descripcion: '', unidad: '', cantidad: 0, precio_unitario: 0, precio_total: 0 };
-        const keys = Object.keys(row);
-
-        // id_insumo_ o similar
-        const idKey = keys.find(k =>
-          k.toLowerCase().startsWith('id_insumo') ||
-          k.toLowerCase() === 'codigo' ||
-          k.toLowerCase() === 'codigo_insumo' ||
-          k.toLowerCase() === 'insumo_id' ||
-          k.toLowerCase() === 'id'
-        );
-        const codigo = idKey ? row[idKey] : (row.codigo || row.id_insumo || '');
-
-        // name_insumo_ o similar
-        const descKey = keys.find(k =>
-          k.toLowerCase().startsWith('name_insumo') ||
-          k.toLowerCase() === 'descripcion' ||
-          k.toLowerCase() === 'nombre' ||
-          k.toLowerCase() === 'nombre_insumo' ||
-          k.toLowerCase() === 'description'
-        );
-        const descripcion = descKey ? row[descKey] : (row.descripcion || row.nombre || '');
-
-        // unidad_ o similar
-        const unitKey = keys.find(k =>
-          k.toLowerCase().startsWith('unidad') ||
-          k.toLowerCase() === 'u' ||
-          k.toLowerCase() === 'medida' ||
-          k.toLowerCase() === 'unidad_medida'
-        );
-        const unidad = unitKey ? row[unitKey] : (row.unidad || row.unid || 'u');
-
-        // cantidad_ o similar
-        const cantKey = keys.find(k =>
-          k.toLowerCase().startsWith('cantidad') ||
-          k.toLowerCase() === 'coeficiente' ||
-          k.toLowerCase() === 'rendimiento' ||
-          k.toLowerCase() === 'cant'
-        );
-        const cantidadVal = cantKey ? parseFloat(row[cantKey]) : 1;
-        const cantidad = isNaN(cantidadVal) ? 1 : cantidadVal;
-
-        // Búsqueda específica de precio_unitario_mat, etc. de las tablas RECETA_MAT, etc.
-        let databasePrecioUnitario = 0;
-        let databasePrecioReceta = 0;
-
-        const pUnitKey = keys.find(k =>
-          k.toLowerCase().startsWith('precio_unitario') ||
-          k.toLowerCase() === 'precio_insumo' ||
-          k.toLowerCase() === 'precio' ||
-          k.toLowerCase() === 'costo'
-        );
-        if (pUnitKey) {
-          databasePrecioUnitario = parseFloat(row[pUnitKey]) || 0;
-        }
-
-        const pRecetaKey = keys.find(k =>
-          k.toLowerCase().startsWith('precio_receta_') ||
-          k.toLowerCase().startsWith('precio_total_') ||
-          k.toLowerCase() === 'precio_receta' ||
-          k.toLowerCase() === 'precio_total' ||
-          k.toLowerCase() === 'subtotal' ||
-          k.toLowerCase() === 'total' ||
-          k.toLowerCase() === 'precio_parcial' ||
-          k.toLowerCase() === 'parcial'
-        );
-        if (pRecetaKey) {
-          databasePrecioReceta = parseFloat(row[pRecetaKey]) || 0;
-        }
-
-        // BÚSQUEDA DEL INSUMO EN LAS TABLAS INSUMOS_MAT, ETC. PARA OBTENER LA UNIDAD Y PRECIO ACTUALIZADOS LIVE
-        let resolvedDescription = String(descripcion || '');
-        let resolvedUnidad = String(unidad || 'u');
-
-        let resolvedPrecioUnitario = databasePrecioUnitario;
-        let hasInsumoMatch = false;
-
-        const lookupId = String(codigo || '').trim().toLowerCase();
-        if (lookupId) {
-          let guessedCat = cat;
-          if (!guessedCat) {
-            const upCod = lookupId.toUpperCase();
-            if (upCod.startsWith('MAT-') || row.id_insumo_mat || 'id_insumo_mat' in row) {
-              guessedCat = 'MAT';
-            } else if (upCod.startsWith('MOB-') || upCod.startsWith('MO-') || row.id_insumo_mob || 'id_insumo_mob' in row) {
-              guessedCat = 'MOB';
-            } else if (upCod.startsWith('EYH-') || upCod.startsWith('EQ-') || row.id_insumo_eyh || 'id_insumo_eyh' in row) {
-              guessedCat = 'EYH';
-            } else if (upCod.startsWith('TRN-') || upCod.startsWith('TR-') || row.id_insumo_transp || 'id_insumo_transp' in row) {
-              guessedCat = 'TRANSP';
-            }
-          }
-
-          if (guessedCat === 'MAT') {
-            const match = insumosMat.find(i =>
-              String(i.id_insumo_mat || i.id || '').trim().toLowerCase() === lookupId
-            );
-            if (match) {
-              hasInsumoMatch = true;
-              resolvedDescription = match.name_insumo_mat || match.nombre || resolvedDescription;
-              resolvedUnidad = match.unidad_mat || match.unidad || resolvedUnidad;
-              const rawPrice = match.precio_mat !== undefined ? match.precio_mat : match.precio_insumo_mat;
-              const matchPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice);
-              if (matchPrice !== undefined && !isNaN(matchPrice)) {
-                resolvedPrecioUnitario = matchPrice;
-              }
-            }
-          } else if (guessedCat === 'MOB') {
-            const match = insumosMob.find(i =>
-              String(i.id_insumo_mob || i.id || '').trim().toLowerCase() === lookupId
-            );
-            if (match) {
-              hasInsumoMatch = true;
-              resolvedDescription = match.name_insumo_mob || match.nombre || resolvedDescription;
-              resolvedUnidad = match.unidad_mob || match.unidad || resolvedUnidad;
-              const rawPrice = match.precio_mob !== undefined ? match.precio_mob : match.precio_insumo_mob;
-              const matchPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice);
-              if (matchPrice !== undefined && !isNaN(matchPrice)) {
-                resolvedPrecioUnitario = matchPrice;
-              }
-            }
-          } else if (guessedCat === 'EYH') {
-            const match = insumosEyh.find(i =>
-              String(i.id_insumo_eyh || i.id || '').trim().toLowerCase() === lookupId
-            );
-            if (match) {
-              hasInsumoMatch = true;
-              resolvedDescription = match.name_insumo_eyh || match.nombre || resolvedDescription;
-              resolvedUnidad = match.unidad_eyh || match.unidad || resolvedUnidad;
-              const rawPrice = match.precio_eyh !== undefined ? match.precio_eyh : match.precio_insumo_eyh;
-              const matchPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice);
-              if (matchPrice !== undefined && !isNaN(matchPrice)) {
-                resolvedPrecioUnitario = matchPrice;
-              }
-            }
-          } else if (guessedCat === 'TRANSP') {
-            const match = insumosTransp.find(i =>
-              String(i.id_insumo_transp || i.id || '').trim().toLowerCase() === lookupId
-            );
-            if (match) {
-              hasInsumoMatch = true;
-              resolvedDescription = match.name_insumo_transp || match.nombre || resolvedDescription;
-              resolvedUnidad = match.unidad_transp || match.unidad || resolvedUnidad;
-              const rawPrice = match.precio_transp !== undefined ? match.precio_transp : match.precio_insumo_transp;
-              const matchPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice);
-              if (matchPrice !== undefined && !isNaN(matchPrice)) {
-                resolvedPrecioUnitario = matchPrice;
-              }
-            }
-          }
-        }
-
-        const resolvedPrecioTotal = databasePrecioReceta || (resolvedPrecioUnitario * cantidad);
-
-        return {
-          codigo: String(codigo || ''),
-          descripcion: resolvedDescription,
-          unidad: resolvedUnidad,
-          amount: cantidad,
-          cantidad,
-          precio_unitario: resolvedPrecioUnitario || databasePrecioUnitario,
-          precio_total: resolvedPrecioTotal,
-        };
-      };
-
-      let dataMat = (rM || []).map(row => normalizarFilaReceta(row, 'MAT'));
-      let dataMob = (rO || []).map(row => normalizarFilaReceta(row, 'MOB'));
-      let dataEyh = (rE || []).map(row => normalizarFilaReceta(row, 'EYH'));
-      let dataTransp = (rT || []).map(row => normalizarFilaReceta(row, 'TRANSP'));
-
-      // Fallback a tabla unificada "RECETA" o "RECETAS" de Supabase si los resultados específicos están vacíos
-      if (dataMat.length === 0 && dataMob.length === 0 && dataEyh.length === 0 && dataTransp.length === 0) {
-        let unifiedRows: any[] = [];
-        try {
-          const { data } = await supabase.from('RECETA').select('*').eq('id_rubro', idRubro);
-          if (data && data.length > 0) unifiedRows = data;
-        } catch (e) { }
-
-        if (unifiedRows.length === 0) {
-          try {
-            const { data } = await supabase.from('RECETA').select('*').eq('rubro_id', idRubro);
-            if (data && data.length > 0) unifiedRows = data;
-          } catch (e) { }
-        }
-
-        if (unifiedRows.length === 0) {
-          try {
-            const { data } = await supabase.from('RECETAS').select('*').eq('id_rubro', idRubro);
-            if (data && data.length > 0) unifiedRows = data;
-          } catch (e) { }
-        }
-
-        if (unifiedRows.length > 0) {
-          unifiedRows.forEach((row: any) => {
-            const t = (row.tipo || row.categoria || row.tipo_insumo || row.grupo || row.tabla || '').toString().toUpperCase();
-            let cat = 'MAT';
-            const normCod = String(row.codigo || row.id_insumo || '').toString().toUpperCase();
-            if (t.includes('MAT') || t.includes('MATERIAL') || normCod.startsWith('MAT-')) {
-              cat = 'MAT';
-            } else if (t.includes('MOB') || t.includes('MANO') || t.includes('OPER') || t.includes('OBRA') || t.includes('TRABAJ') || normCod.startsWith('MOB-') || normCod.startsWith('MO-')) {
-              cat = 'MOB';
-            } else if (t.includes('EYH') || t.includes('EQU') || t.includes('MAQ') || t.includes('HERR') || normCod.startsWith('EYH-') || normCod.startsWith('EQ-')) {
-              cat = 'EYH';
-            } else if (t.includes('TRA') || t.includes('FLE') || normCod.startsWith('TRN-') || normCod.startsWith('TR-')) {
-              cat = 'TRANSP';
-            }
-
-            const normalized = normalizarFilaReceta(row, cat);
-            if (cat === 'MAT') {
-              dataMat.push(normalized);
-            } else if (cat === 'MOB') {
-              dataMob.push(normalized);
-            } else if (cat === 'EYH') {
-              dataEyh.push(normalized);
-            } else if (cat === 'TRANSP') {
-              dataTransp.push(normalized);
-            }
-          });
-        }
-      }
+      const mat = (rows || []).filter(r => r.categoria === 'materiales').map(normalizarFilaReceta);
+      const mob = (rows || []).filter(r => r.categoria === 'mano_de_obra').map(normalizarFilaReceta);
+      const eyh = (rows || []).filter(r => r.categoria === 'equipos_herramientas').map(normalizarFilaReceta);
+      const transp = (rows || []).filter(r => r.categoria === 'transporte').map(normalizarFilaReceta);
 
       setApuAuditor({
         id_rubro: idRubro,
-        mat: dataMat,
-        mob: dataMob,
-        eyh: dataEyh,
-        transp: dataTransp,
+        mat,
+        mob,
+        eyh,
+        transp,
       });
     } catch (err) {
-      mostrarToast("Error analizando composición APU.", 'error');
+      console.error('Error analizando composición APU:', err);
+      mostrarToast('Error al analizar composición APU.', 'error');
     } finally {
       setCargandoReceta(false);
     }
@@ -1552,137 +1147,217 @@ ${catalogoTexto}`;
     }
   };
 
-  const guardarNuevoPresupuesto = async () => {
+  const getTotalesCalculados = React.useMemo(() => {
+    const sub = nuevoPresupuesto.capitulos.reduce((acc, cap) => 
+      acc + cap.items.reduce((sum, item) => sum + (item.subtotal || 0), 0), 0);
+    const ind = (sub * (nuevoPresupuesto.indirectosPct || 0)) / 100;
+    const uti = ((sub + ind) * (nuevoPresupuesto.utilidadPct || 0)) / 100;
+    const iva = ((sub + ind + uti) * (nuevoPresupuesto.ivaPct || 0)) / 100;
+    const tot = sub + ind + uti + iva;
+    const dir = sub;
+    return [Number(dir), Number(ind), Number(uti), Number(sub), Number(iva), Number(tot)];
+  }, [nuevoPresupuesto]);
+
+  // Autoguardado de Presupuesto (Debounce)
+  useEffect(() => {
+    if (!mostrarCreadorPresupuesto || !editandoPresupuestoId || !nuevoPresupuesto.proyecto || !nuevoPresupuesto.cliente) return;
+    if (proyectoActivo?.miRol === 'lector') return;
+
+    const handler = setTimeout(() => {
+      guardarNuevoPresupuesto(true);
+    }, 2500);
+
+    return () => clearTimeout(handler);
+  }, [nuevoPresupuesto, mostrarCreadorPresupuesto, editandoPresupuestoId, proyectoActivo]);
+
+  const guardarNuevoPresupuesto = async (silencioso = false) => {
     if (!nuevoPresupuesto.proyecto || !nuevoPresupuesto.cliente) {
-      mostrarToast('Por favor, ingrese el nombre del proyecto y de su cliente.', 'error');
+      if (!silencioso) mostrarToast('Por favor, ingrese el nombre del proyecto y de su cliente.', 'error');
       return;
     }
 
-    const todosLosItemsAplanados: any[] = [];
-    nuevoPresupuesto.capitulos.forEach((cap) => {
-      cap.items.forEach((item) => {
-        todosLosItemsAplanados.push({
-          ...item,
-          capitulo_nombre: cap.nombre
-        });
-      });
-    });
+    if (!organizacionActiva?.id) {
+      if (!silencioso) mostrarToast('Debe seleccionar una constructora / organización activa.', 'error');
+      return;
+    }
 
-    if (todosLosItemsAplanados.length === 0) {
-      mostrarToast("No hay elementos para presupuestar.", 'error');
+    if (!proyectoActivo?.id) {
+      if (!silencioso) mostrarToast('Debe seleccionar una obra / proyecto activo para guardar el presupuesto.', 'error');
+      return;
+    }
+
+    if (esSoloLectura || proyectoActivo?.miRol === 'viewer' || proyectoActivo?.miRol === 'fiscalizador_lectura') {
+      if (!silencioso) mostrarToast('No tiene permisos de escritura en este proyecto.', 'error');
+      return;
+    }
+
+    const capitulosConItems = nuevoPresupuesto.capitulos.filter(
+      (c: any) => c.items && c.items.length > 0
+    );
+
+    if (capitulosConItems.length === 0) {
+      if (!silencioso) mostrarToast('No hay elementos para presupuestar.', 'error');
       return;
     }
 
     try {
-      mostrarToast('Guardando en Supabase...', 'info');
+      if (!silencioso) mostrarToast('Guardando en Supabase...', 'info');
+      const client = getSupabaseClient();
 
       let presId = '';
       if (editandoPresupuestoId) {
         presId = editandoPresupuestoId;
-        const { error: presError } = await supabase
-          .from('PRESUPUESTOS')
+        const { error: presError } = await client
+          .from('presupuestos')
           .update({
-            nombre: `${nuevoPresupuesto.proyecto} | ${nuevoPresupuesto.cliente}`,
-            precio_presup_total: Number(granTotalNuevoPresupuesto),
+            nombre: nuevoPresupuesto.proyecto,
+            descripcion: `Cliente: ${nuevoPresupuesto.cliente}${nuevoPresupuesto.notas ? ` | ${nuevoPresupuesto.notas}` : ''}`,
+            porcentaje_indirectos: Number(nuevoPresupuesto.indirectosPct || 0),
+            porcentaje_utilidad: Number(nuevoPresupuesto.utilidadPct || 0),
+            porcentaje_iva: Number(nuevoPresupuesto.ivaPct || 0),
           })
           .eq('id', editandoPresupuestoId);
 
         if (presError) throw presError;
 
-        // Limpiar detalles viejos
-        await supabase.from('DETALLES_PRESUPUESTO').delete().eq('presupuesto_id', editandoPresupuestoId);
+        // Limpiar capítulos y partidas anteriores (CASCADE limpia presupuesto_items)
+        await client.from('presupuesto_capitulos').delete().eq('presupuesto_id', editandoPresupuestoId);
       } else {
-        const { data: presData, error: presError } = await supabase
-          .from('PRESUPUESTOS')
-          .insert([
-            {
-              nombre: `${nuevoPresupuesto.proyecto} | ${nuevoPresupuesto.cliente}`,
-              estado: 'Borrador',
-              precio_presup_total: Number(granTotalNuevoPresupuesto),
-            },
-          ])
-          .select()
+        const { data: presData, error: presError } = await client
+          .from('presupuestos')
+          .insert({
+            organizacion_id: organizacionActiva.id,
+            proyecto_id: proyectoActivo.id,
+            codigo: `PRE-${Date.now().toString().slice(-6)}`,
+            nombre: nuevoPresupuesto.proyecto,
+            descripcion: `Cliente: ${nuevoPresupuesto.cliente}${nuevoPresupuesto.notas ? ` | ${nuevoPresupuesto.notas}` : ''}`,
+            estado: 'borrador',
+            porcentaje_indirectos: Number(nuevoPresupuesto.indirectosPct || 0),
+            porcentaje_utilidad: Number(nuevoPresupuesto.utilidadPct || 0),
+            porcentaje_iva: Number(nuevoPresupuesto.ivaPct || 0),
+            created_by: usuario?.id || null,
+          })
+          .select('id')
           .single();
 
         if (presError) throw presError;
         presId = presData.id;
+
+        if (silencioso) setEditandoPresupuestoId(presId);
       }
 
-      const detallesParaBD = todosLosItemsAplanados.map((item) => ({
-        presupuesto_id: presId,
-        id_rubro_presup: item.id_rubro,
-        nombre_rubro_presup: item.nombre_rubro,
-        unidad_rubro_presup: item.unidad,
-        precio_rubro_presup: Number(item.precio),
-        cantidad_presup: Number(item.cantidad),
-        capitulo_presup: item.capitulo_nombre,
-      }));
+      // Insertar capítulos e ítems estructurados
+      // NOTA: Los totales se calculan automáticamente vía triggers PostgreSQL en la base de datos
+      for (let cIdx = 0; cIdx < nuevoPresupuesto.capitulos.length; cIdx++) {
+        const cap = nuevoPresupuesto.capitulos[cIdx];
+        if (!cap.items || cap.items.length === 0) continue;
 
-      const { error: detError } = await supabase
-        .from('DETALLES_PRESUPUESTO')
-        .insert(detallesParaBD);
+        const { data: capData, error: capError } = await client
+          .from('presupuesto_capitulos')
+          .insert({
+            presupuesto_id: presId,
+            nombre: cap.nombre,
+            numero_orden: cIdx + 1,
+          })
+          .select('id')
+          .single();
 
-      if (detError) throw detError;
+        if (capError) throw capError;
 
-      // Reset estimate form state
-      setNuevoPresupuesto({
-        proyecto: '',
-        cliente: '',
-        notas: '',
-        capituloActivo: '1. OBRAS PRELIMINARES',
-        capituloNuevo: '',
-        capitulos: [
-          { nombre: '1. OBRAS PRELIMINARES', items: [] },
-          { nombre: '2. ESTRUCTURAS Y HORMIGONES', items: [] },
-          { nombre: '3. MAMPOSTERÍAS Y ACABADOS', items: [] },
-        ],
-        indirectosPct: 12,
-        utilidadPct: 8,
-        ivaPct: 10,
-      });
+        const itemsPayload = cap.items.map((it: any, iIdx: number) => ({
+          presupuesto_id: presId,
+          capitulo_id: capData.id,
+          rubro_id: it.id_rubro || it.id || null,
+          codigo_item: it.codigo || it.codigo_item || `ITM-${cIdx + 1}.${iIdx + 1}`,
+          nombre_rubro: it.nombre_rubro || it.nombre || 'Rubro',
+          unidad: it.unidad || 'u',
+          precio_unitario: Number(it.precio || it.precio_unitario || 0),
+          cantidad: Number(it.cantidad || 0),
+          numero_orden: iIdx + 1,
+        }));
 
-      setEditandoPresupuestoId(null);
-      setMostrarCreadorPresupuesto(false);
-      setBusquedaRubro('');
-      await cargarPresupuestos();
-      mostrarToast('¡Presupuesto guardado exitosamente en Supabase!', 'success');
+        const { error: itemsError } = await client
+          .from('presupuesto_items')
+          .insert(itemsPayload);
+
+        if (itemsError) throw itemsError;
+      }
+
+      if (!silencioso) {
+        setNuevoPresupuesto({
+          proyecto: '',
+          cliente: '',
+          notas: '',
+          capituloActivo: '1. OBRAS PRELIMINARES',
+          capituloNuevo: '',
+          capitulos: [
+            { nombre: '1. OBRAS PRELIMINARES', items: [] },
+            { nombre: '2. ESTRUCTURAS Y HORMIGONES', items: [] },
+            { nombre: '3. MAMPOSTERÍAS Y ACABADOS', items: [] },
+          ],
+          indirectosPct: 12,
+          utilidadPct: 8,
+          ivaPct: 10,
+        });
+
+        setEditandoPresupuestoId(null);
+        setMostrarCreadorPresupuesto(false);
+        setBusquedaRubro('');
+        await cargarPresupuestos();
+        mostrarToast('¡Presupuesto guardado exitosamente en Supabase!', 'success');
+      } else {
+        cargarPresupuestos();
+      }
     } catch (error: any) {
-      console.error('Error al guardar:', error);
-      mostrarToast('Error al guardar presupuesto: ' + error.message, 'error');
+      console.error('Error al guardar presupuesto:', error);
+      if (!silencioso) mostrarToast('Error al guardar presupuesto: ' + (error.message || ''), 'error');
     }
   };
 
   const eliminarPresupuesto = async (id: string) => {
     try {
       mostrarToast('Eliminando...', 'info');
-      await supabase.from('DETALLES_PRESUPUESTO').delete().eq('presupuesto_id', id);
-      const { error } = await supabase.from('PRESUPUESTOS').delete().eq('id', id);
+      const client = getSupabaseClient();
+      const { error } = await client.from('presupuestos').delete().eq('id', id);
       if (error) throw error;
 
       mostrarToast('Presupuesto eliminado con éxito.', 'info');
       await cargarPresupuestos();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error al eliminar:', err);
-      mostrarToast('Error al eliminar presupuesto.', 'error');
+      mostrarToast('Error al eliminar presupuesto: ' + (err.message || ''), 'error');
     }
   };
 
-  const actualizarEstadoPresupuesto = async (id: string, nuevoEstado: 'Borrador' | 'Aprobado' | 'Rechazado') => {
+  const actualizarEstadoPresupuesto = async (id: string, nuevoEstado: string) => {
     try {
+      const mapeoEstado: Record<string, 'borrador' | 'en_revision' | 'aprobado' | 'rechazado'> = {
+        'Borrador': 'borrador',
+        'borrador': 'borrador',
+        'Aprobado': 'aprobado',
+        'aprobado': 'aprobado',
+        'Rechazado': 'rechazado',
+        'rechazado': 'rechazado',
+        'En Revision': 'en_revision',
+        'en_revision': 'en_revision',
+      };
+      const estadoNormalizado = mapeoEstado[nuevoEstado] || 'borrador';
+
       setPresupuestos((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, estado: nuevoEstado } : p))
+        prev.map((p) => (p.id === id ? { ...p, estado: estadoNormalizado } : p))
       );
 
-      const { error } = await supabase
-        .from('PRESUPUESTOS')
-        .update({ estado: nuevoEstado })
+      const client = getSupabaseClient();
+      const { error } = await client
+        .from('presupuestos')
+        .update({ estado: estadoNormalizado })
         .eq('id', id);
 
       if (error) throw error;
-      mostrarToast(`Estado cambiado a ${nuevoEstado}.`, 'success');
-    } catch (error) {
+      mostrarToast(`Estado cambiado a ${estadoNormalizado}.`, 'success');
+    } catch (error: any) {
       console.error('Error al actualizar estado:', error);
-      mostrarToast('Error al actualizar el estado del presupuesto.', 'error');
+      mostrarToast('Error al actualizar el estado: ' + (error.message || ''), 'error');
       await cargarPresupuestos();
     }
   };
@@ -1715,12 +1390,12 @@ ${catalogoTexto}`;
       proyecto: p.proyecto,
       cliente: p.cliente,
       notas: '',
-      capituloActivo: '1. OBRAS PRELIMINARES',
+      capituloActivo: capitulosList[0]?.nombre || '1. OBRAS PRELIMINARES',
       capituloNuevo: '',
       capitulos: capitulosList,
-      indirectosPct: 12,
-      utilidadPct: 8,
-      ivaPct: 10,
+      indirectosPct: p.porcentaje_indirectos ?? 12,
+      utilidadPct: p.porcentaje_utilidad ?? 8,
+      ivaPct: p.porcentaje_iva ?? 10,
     });
     setMostrarCreadorPresupuesto(true);
   };
@@ -1867,6 +1542,20 @@ ${catalogoTexto}`;
     });
   };
 
+  if (authCargando) {
+    return (
+      <div className="min-h-screen w-screen flex flex-col items-center justify-center bg-stone-950 text-white font-sans">
+        <div className="w-14 h-14 bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl flex items-center justify-center font-display font-extrabold text-xl shadow-xl shadow-orange-500/25 mb-4 animate-pulse">
+          APU
+        </div>
+        <div className="flex items-center gap-2 text-stone-400 text-xs">
+          <i className="ti ti-loader-2 spin text-orange-500 text-base"></i>
+          <span>Cargando sesión y espacio de trabajo...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Toast Alert */}
@@ -1886,26 +1575,103 @@ ${catalogoTexto}`;
         )}
       </AnimatePresence>
 
-      {/* Invoice Pre-view sheet */}
-      {reporteActivo && (
-        <ReportModal
-          presupuesto={reporteActivo}
-          onClose={() => setReporteActivo(null)}
-          onTriggerBrowserPrint={triggerBrowserPrint}
-        />
-      )}
+      {!usuario ? (
+        <Login onLoginSuccess={() => {}} mostrarToast={mostrarToast} />
+      ) : (
+        <>
+          {/* Modal de Selector de Organización / Constructora Multi-tenant */}
+          {(!organizacionActiva || mostrarModalOrganizaciones) && (
+            <OrganizacionSelectorModal
+              abierto={true}
+              onCerrar={() => setMostrarModalOrganizaciones(false)}
+              mostrarToast={mostrarToast}
+            />
+          )}
 
-      {/* ╔══════════════════════════════════════╗ */}
-      {/* ║            LAYOUT DESKTOP             ║ */}
-      {/* ╚══════════════════════════════════════╝ */}
-      {!isMobile ? (
+          {/* Proyecto Selector Modal (Aparece si hay org activa pero no hay proyecto activo o al hacer clic en Cambiar) */}
+          {organizacionActiva && (!proyectoActivo || mostrarModalProyectos) && (
+            <ProyectoSelectorModal
+              usuarioId={usuario.id}
+              usuarioEmail={usuario.email}
+              organizacionId={organizacionActiva.id}
+              proyectoActivo={proyectoActivo}
+              onSeleccionarProyecto={seleccionarProyecto}
+              mostrarToast={mostrarToast}
+              onCerrarSesion={cerrarSesion}
+              onCerrarModal={() => setMostrarModalProyectos(false)}
+            />
+          )}
+
+          {/* Invoice Pre-view sheet */}
+          {reporteActivo && (
+            <ReportModal
+              presupuesto={reporteActivo}
+              onClose={() => setReporteActivo(null)}
+              onTriggerBrowserPrint={triggerBrowserPrint}
+            />
+          )}
+
+          {/* ╔══════════════════════════════════════╗ */}
+          {/* ║            LAYOUT DESKTOP             ║ */}
+          {/* ╚══════════════════════════════════════╝ */}
+          {!isMobile ? (
         <div className="desk-root flex flex-col w-screen h-screen overflow-hidden">
           {/* Header */}
           <header id="desktop-app-header" className="desk-topbar">
             <div className="desk-logo select-none">APUStudio</div>
             <div className="desk-topbar-sep"></div>
-            <span className="desk-brand font-black tracking-widest text-[11px]">ERP de Costos y Presupuestos</span>
-            <nav className="desk-nav flex items-center">
+
+            {/* Selector de Organización / Constructora Activa */}
+            {organizacionActiva && (
+              <div
+                onClick={() => setMostrarModalOrganizaciones(true)}
+                className="flex items-center gap-2 bg-stone-900 border border-stone-800 hover:border-orange-500/40 px-3 py-1.5 rounded-2xl text-xs shadow-sm cursor-pointer transition-colors mr-2 select-none"
+                title="Cambiar de Constructora / Organización"
+              >
+                <i className="ti ti-building-skyscraper text-orange-400 text-sm"></i>
+                <span className="font-bold text-white max-w-[150px] truncate">
+                  {organizacionActiva.nombre}
+                </span>
+                <span className="bg-orange-500/20 text-orange-400 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
+                  {rolOrg || 'Miembro'}
+                </span>
+                <i className="ti ti-selector text-stone-500 text-xs"></i>
+              </div>
+            )}
+
+            {/* Active Project Badge Selector */}
+            {proyectoActivo && (
+              <div className="flex items-center gap-2 bg-stone-900 border border-stone-800 px-3 py-1.5 rounded-2xl text-xs shadow-sm">
+                <i className="ti ti-building font-medium text-orange-400"></i>
+                <span className="font-bold text-white max-w-[140px] truncate" title={proyectoActivo.nombre_proyecto}>
+                  {proyectoActivo.nombre_proyecto}
+                </span>
+                {proyectoActivo.miRol === 'admin' && (
+                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
+                    ADMIN
+                  </span>
+                )}
+                {proyectoActivo.miRol === 'editor' && (
+                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
+                    EDITOR
+                  </span>
+                )}
+                {proyectoActivo.miRol === 'viewer' && (
+                  <span className="bg-sky-500/20 text-sky-300 border border-sky-500/30 text-[9px] font-black uppercase px-1.5 py-0.5 rounded">
+                    LECTOR
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setMostrarModalProyectos(true)}
+                  className="text-[10.5px] text-orange-400 hover:text-orange-300 font-bold ml-1 border-none bg-transparent cursor-pointer underline"
+                >
+                  Cambiar
+                </button>
+              </div>
+            )}
+
+            <nav className="desk-nav flex items-center ml-auto">
               <a
                 id="tab-btn-insumos"
                 className={tabActiva === 'insumos' ? 'active font-bold' : ''}
@@ -1927,6 +1693,15 @@ ${catalogoTexto}`;
               >
                 <i className="ti ti-report-money"></i> Presupuestos
               </a>
+              {(esDuenoOAdmin || puedeAprobarEnProyecto || proyectoActivo?.miRol === 'admin' || proyectoActivo?.miRol === 'director') && (
+                <a
+                  id="tab-btn-aprobaciones"
+                  className={tabActiva === 'aprobaciones' ? 'active font-bold' : ''}
+                  onClick={() => cambiarTab('aprobaciones')}
+                >
+                  <i className="ti ti-check text-orange-500"></i> Aprobaciones y Auditoría
+                </a>
+              )}
               <a
                 id="tab-btn-config"
                 className={tabActiva === 'config' ? 'active font-bold' : ''}
@@ -1942,14 +1717,23 @@ ${catalogoTexto}`;
                 <i className="ti ti-file-upload"></i> Importar APU
               </a>
             </nav>
-            <div className="desk-topbar-right">
+            <div className="desk-topbar-right flex items-center gap-3">
               <span className={`desk-badge text-[10px] ${cargando ? 'loading' : ''} px-2.5 py-1 rounded-md`}>
                 <i className={`ti ${cargando ? 'ti-loader-2 spin' : 'ti-database'}`}></i>
                 {cargando ? 'Conectando...' : isLiveSupabase ? 'CONECTADO' : 'MODO LOCAL'}
               </span>
-              <span className="desk-user text-xs font-semibold text-stone-300">
-                <i className="ti ti-user-circle"></i> Administrador
-              </span>
+              <div className="flex items-center gap-2 bg-stone-850 px-3 py-1.5 rounded-xl border border-stone-800">
+                <span className="desk-user text-xs font-semibold text-stone-300 flex items-center gap-1.5">
+                  <i className="ti ti-user-circle"></i> {usuario?.email || 'Usuario'}
+                </span>
+                <button
+                  onClick={cerrarSesion}
+                  title="Cerrar Sesión"
+                  className="text-stone-400 hover:text-red-400 transition-colors ml-1 p-0.5 rounded cursor-pointer border-none bg-transparent flex items-center justify-center"
+                >
+                  <i className="ti ti-logout text-sm font-bold"></i>
+                </button>
+              </div>
             </div>
           </header>
 
@@ -2003,6 +1787,16 @@ ${catalogoTexto}`;
                   <i className="ti ti-file-upload"></i>
                   {!sidebarColapsado && <span className="sidebar-text">Importar APU (PDF)</span>}
                 </div>
+                {(esDuenoOAdmin || puedeAprobarEnProyecto || proyectoActivo?.miRol === 'admin' || proyectoActivo?.miRol === 'director') && (
+                  <div
+                    id="side-btn-aprobaciones"
+                    className={`desk-sidebar-item ${tabActiva === 'aprobaciones' ? 'active' : ''}`}
+                    onClick={() => cambiarTab('aprobaciones')}
+                  >
+                    <i className="ti ti-check text-orange-500"></i>
+                    {!sidebarColapsado && <span className="sidebar-text">Aprobaciones y Auditoría</span>}
+                  </div>
+                )}
               </div>
 
               <div className="desk-sidebar-hr"></div>
@@ -2063,7 +1857,7 @@ ${catalogoTexto}`;
                 cargandoReceta={cargandoReceta}
                 seccionesReceta={sRecetas}
                 actualizarRubro={actualizarRubro}
-                actualizarCantidadReceta={actualizarCantidadReceta}
+                actualizarCantidadReceta={actualizarComponenteReceta}
                 eliminarInsumoReceta={eliminarInsumoReceta}
                 agregarInsumoReceta={agregarInsumoReceta}
                 insumosMat={insumosMat}
@@ -2071,6 +1865,7 @@ ${catalogoTexto}`;
                 insumosEyh={insumosEyh}
                 insumosTransp={insumosTransp}
                 crearRubro={crearRubro}
+                proyectoActivo={proyectoActivo}
               />
             )}
 
@@ -2111,11 +1906,26 @@ ${catalogoTexto}`;
             )}
 
             {tabActiva === 'upload' && (
-              <UploadPanel />
+              <UploadPanel proyectoActivo={proyectoActivo} />
             )}
 
             {tabActiva === 'config' && (
-              <ConfigPanel configIA={configIA} setConfigIA={setConfigIA} />
+              <ConfigPanel
+                configIA={configIA}
+                setConfigIA={setConfigIA}
+                proyectoActivo={proyectoActivo}
+                mostrarToast={mostrarToast}
+                abrirSelectorOrg={() => setMostrarModalOrganizaciones(true)}
+                abrirSelectorProyecto={() => setMostrarModalProyectos(true)}
+              />
+            )}
+            
+            {tabActiva === 'aprobaciones' && (esDuenoOAdmin || puedeAprobarEnProyecto || proyectoActivo?.miRol === 'admin' || proyectoActivo?.miRol === 'director') && (
+              <AprobacionesPanel 
+                proyectoActivo={proyectoActivo}
+                supabase={supabase}
+                mostrarToast={mostrarToast}
+              />
             )}
           </div>
 
@@ -2148,9 +1958,16 @@ ${catalogoTexto}`;
             {vista === 'lista' ? (
               <div className="mob-brand flex items-center gap-2">
                 <span className="mob-brand-mark">APUStudio</span>
-                <span className="mob-brand-name font-black tracking-widest text-xs uppercase text-white">
-                  Sistema de Costos
-                </span>
+                {organizacionActiva && (
+                  <button
+                    onClick={() => setMostrarModalOrganizaciones(true)}
+                    className="flex items-center gap-1.5 bg-stone-850 px-2 py-0.5 rounded-lg border border-stone-750 text-[10px] text-orange-400 font-bold"
+                  >
+                    <i className="ti ti-building-skyscraper text-[11px]"></i>
+                    <span className="truncate max-w-[90px]">{organizacionActiva.nombre}</span>
+                    <i className="ti ti-selector text-stone-500 text-[9px]"></i>
+                  </button>
+                )}
               </div>
             ) : (
               <div className="mob-topbar-title font-bold text-xs uppercase text-white truncate px-2">
@@ -2162,6 +1979,15 @@ ${catalogoTexto}`;
               {vista === 'detalle' && !editando && (
                 <button className="mob-btn-icon cursor-pointer text-white" onClick={iniciarEdicion}>
                   <i className="ti ti-pencil"></i>
+                </button>
+              )}
+              {vista === 'lista' && (
+                <button
+                  onClick={cerrarSesion}
+                  title="Cerrar Sesión"
+                  className="mob-btn-icon cursor-pointer text-stone-400 hover:text-red-400 p-1 flex items-center justify-center"
+                >
+                  <i className="ti ti-logout text-base font-bold"></i>
                 </button>
               )}
             </div>
@@ -2535,7 +2361,16 @@ ${catalogoTexto}`;
 
             {/* VIEW list - Upload */}
             {vista === 'lista' && tabActiva === 'upload' && (
-              <UploadPanel />
+              <UploadPanel proyectoActivo={proyectoActivo} />
+            )}
+            
+            {/* VIEW list - Aprobaciones */}
+            {tabActiva === 'aprobaciones' && proyectoActivo?.miRol === 'admin' && (
+              <AprobacionesPanel 
+                proyectoActivo={proyectoActivo}
+                supabase={supabase}
+                mostrarToast={mostrarToast}
+              />
             )}
 
             {/* VIEW detail - Insumo */}
@@ -2760,6 +2595,8 @@ ${catalogoTexto}`;
             </button>
           </nav>
         </div>
+      )}
+        </>
       )}
     </>
   );

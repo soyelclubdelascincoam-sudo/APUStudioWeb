@@ -9,7 +9,11 @@ interface RubrosPanelProps {
   cargandoReceta: boolean;
   seccionesReceta: any[];
   actualizarRubro: (idRubro: string, nuevoNombre: string, nuevaUnidad: string) => Promise<void>;
-  actualizarCantidadReceta: (idRubro: string, row: any, nuevaCantidad: number) => Promise<void>;
+  actualizarCantidadReceta: (
+    idRubro: string,
+    row: any,
+    valores: { cantidad: number; rendimiento?: number; distancia?: number }
+  ) => Promise<void>;
   eliminarInsumoReceta: (idRubro: string, row: any) => Promise<void>;
   agregarInsumoReceta: (idRubro: string, insumo: any, catKey: string, cantidad: number) => Promise<void>;
   insumosMat: any[];
@@ -17,6 +21,7 @@ interface RubrosPanelProps {
   insumosEyh: any[];
   insumosTransp: any[];
   crearRubro: (nombre: string, unidad: string) => Promise<any>;
+  proyectoActivo?: any;
 }
 
 export default function RubrosPanel({
@@ -36,6 +41,7 @@ export default function RubrosPanel({
   insumosEyh,
   insumosTransp,
   crearRubro,
+  proyectoActivo
 }: RubrosPanelProps) {
   // Estados locales para edición de Rubro
   const [editandoRubro, setEditandoRubro] = useState(false);
@@ -51,6 +57,7 @@ export default function RubrosPanel({
   // Estados locales para edición de cantidad de Receta
   const [filaEnEdicion, setFilaEnEdicion] = useState<string | null>(null);
   const [tempCantidad, setTempCantidad] = useState<number>(0);
+  const [tempRendimiento, setTempRendimiento] = useState<number>(0);
 
   // Estado local para confirmación de eliminación de insumos (reemplazo de confirm)
   const [filaEnConfirmacionEliminar, setFilaEnConfirmacionEliminar] = useState<string | null>(null);
@@ -114,7 +121,11 @@ export default function RubrosPanel({
       await actualizarCantidadReceta(
         rubroSeleccionado.id_rubro || rubroSeleccionado.id,
         row,
-        tempCantidad
+        {
+          cantidad: row.es_porcentaje ? tempCantidad / 100 : tempCantidad,
+          rendimiento: tempRendimiento,
+          distancia: tempRendimiento
+        }
       );
       setFilaEnEdicion(null);
     } finally {
@@ -212,16 +223,18 @@ export default function RubrosPanel({
             <label className="text-xs font-bold text-stone-500 uppercase tracking-wider">
               Análisis de Precios Unitarios (APU)
             </label>
-            <button
-              onClick={() => {
-                seleccionarRubro(null);
-                setCreandoRubro(true);
-              }}
-              className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-sm"
-              title="Generar un nuevo rubro desde cero"
-            >
-              <i className="ti ti-plus"></i> Nuevo Rubro
-            </button>
+            {proyectoActivo?.miRol !== 'lector' && (
+              <button
+                onClick={() => {
+                  seleccionarRubro(null);
+                  setCreandoRubro(true);
+                }}
+                className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                title="Generar un nuevo rubro desde cero"
+              >
+                <i className="ti ti-plus"></i> Nuevo Rubro
+              </button>
+            )}
           </div>
           <div className="relative">
             <i className="ti ti-search absolute left-3 top-3.5 text-stone-400"></i>
@@ -395,16 +408,18 @@ export default function RubrosPanel({
                     <h4 className="font-extrabold text-sm text-stone-800 leading-tight flex-1 pr-2">
                       {rubroSeleccionado.nombre_rubro}
                     </h4>
-                    <button
-                      onClick={() => {
-                        setTempNombreRubro(rubroSeleccionado.nombre_rubro || '');
-                        setTempUnidadRubro(rubroSeleccionado.unidad_rubro || rubroSeleccionado.unidad || 'm³');
-                        setEditandoRubro(true);
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-900 hover:bg-orange-600 text-white rounded-xl text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap"
-                    >
-                      <i className="ti ti-pencil"></i> Modificar Rubro
-                    </button>
+                    {proyectoActivo?.miRol !== 'lector' && (
+                      <button
+                        onClick={() => {
+                          setTempNombreRubro(rubroSeleccionado.nombre_rubro || '');
+                          setTempUnidadRubro(rubroSeleccionado.unidad_rubro || rubroSeleccionado.unidad || 'm³');
+                          setEditandoRubro(true);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-900 hover:bg-orange-600 text-white rounded-xl text-[10px] font-bold transition-all cursor-pointer whitespace-nowrap"
+                      >
+                        <i className="ti ti-pencil"></i> Modificar Rubro
+                      </button>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <span className="font-mono text-[9px] font-bold bg-stone-100 text-stone-600 border border-stone-200 px-2.5 py-0.5 rounded-full select-none">
@@ -450,12 +465,14 @@ export default function RubrosPanel({
                         </span>
                         <div className="flex items-center gap-3">
                           <span className="font-mono text-orange-400 font-black">${subTotal.toFixed(2)}</span>
-                          <button
-                            onClick={() => iniciarAdicion(sec.label)}
-                            className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-[9px] px-2 py-1 rounded-lg transition-colors flex items-center gap-1 normal-case tracking-normal cursor-pointer"
-                          >
-                            <i className="ti ti-plus"></i> Añadir Insumo
-                          </button>
+                          {proyectoActivo?.miRol !== 'lector' && (
+                            <button
+                              onClick={() => iniciarAdicion(sec.label)}
+                              className="bg-orange-600 hover:bg-orange-700 text-white font-bold text-[9px] px-2 py-1 rounded-lg transition-colors flex items-center gap-1 normal-case tracking-normal cursor-pointer"
+                            >
+                              <i className="ti ti-plus"></i> Añadir Insumo
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -466,7 +483,12 @@ export default function RubrosPanel({
                               <th className="py-2 px-3 w-14">Código</th>
                               <th className="py-2 px-3">Descripción</th>
                               <th className="py-2 px-3 text-center">Unidad</th>
-                              <th className="py-2 px-3 text-center w-24">Cant</th>
+                              {sec.label !== 'Materiales' && (
+                                <th className="py-2 px-3 text-center w-20">Cant</th>
+                              )}
+                              <th className="py-2 px-3 text-center w-28">
+                                {sec.label === 'Materiales' ? 'Consumo' : sec.label === 'Transporte y Flete' ? 'Distancia (km)' : 'Rendimiento'}
+                              </th>
                               <th className="py-2 px-3 text-right">P. Unit</th>
                               <th className="py-2 px-3 text-right">Parcial</th>
                               <th className="py-2 px-3 text-center w-12">Acción</th>
@@ -475,6 +497,12 @@ export default function RubrosPanel({
                           <tbody className="divide-y divide-stone-100">
                             {sec.data.map((row: any, idx: number) => {
                               const isRowEditing = filaEnEdicion === row.codigo;
+                              const getEditValue = () => {
+                                if (sec.label === 'Materiales') return row.cantidad;
+                                if (sec.label === 'Transporte y Flete') return row._originalRow?.distancia_ ?? 0;
+                                return row._originalRow?.rendimiento_ ?? 1;
+                              };
+                              const displayEditValue = getEditValue();
                               return (
                                 <tr key={idx} className="hover:bg-stone-50/50 transition-colors">
                                   <td className="py-2 px-3 text-stone-400 font-mono text-[9px]">{row.codigo}</td>
@@ -482,16 +510,38 @@ export default function RubrosPanel({
                                     {row.descripcion}
                                   </td>
                                   <td className="py-2 px-3 text-center text-stone-500">{row.unidad}</td>
-                                  <td className="py-2 px-3 text-center">
-                                    {isRowEditing ? (
-                                      <div className="flex flex-col items-center justify-center">
+                                  {sec.label !== 'Materiales' && (
+                                    <td className="py-2 px-3 text-center text-stone-600 font-medium">
+                                      {isRowEditing ? (
                                         <input
                                           type="number"
                                           step="any"
                                           value={tempCantidad}
                                           onChange={(e) => setTempCantidad(parseFloat(e.target.value) || 0)}
                                           className="w-16 p-1 border border-stone-300 rounded text-center text-xs font-bold font-mono outline-none focus:border-orange-500 bg-white"
-                                          autoFocus
+                                        />
+                                      ) : (
+                                        row.es_porcentaje ? `${(row.cantidad * 100).toFixed(2)}%` : row.cantidad
+                                      )}
+                                    </td>
+                                  )}
+                                  <td className="py-2 px-3 text-center">
+                                    {isRowEditing ? (
+                                      <div className="flex flex-col items-center justify-center">
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          value={sec.label === 'Materiales' ? tempCantidad : tempRendimiento}
+                                          onChange={(e) => {
+                                            const v = parseFloat(e.target.value) || 0;
+                                            if (sec.label === 'Materiales') {
+                                              setTempCantidad(v);
+                                            } else {
+                                              setTempRendimiento(v);
+                                            }
+                                          }}
+                                          className="w-20 p-1 border border-stone-300 rounded text-center text-xs font-bold font-mono outline-none focus:border-orange-500 bg-white"
+                                          autoFocus={sec.label === 'Materiales'}
                                         />
                                         <div className="flex gap-2 items-center justify-center mt-1">
                                           <button
@@ -515,15 +565,16 @@ export default function RubrosPanel({
                                     ) : (
                                       <span
                                         onClick={() => {
-                                          if (!cargandoAccion) {
+                                          if (proyectoActivo?.miRol !== 'lector' && !cargandoAccion) {
                                             setFilaEnEdicion(row.codigo);
-                                            setTempCantidad(row.cantidad);
+                                            setTempCantidad(row.es_porcentaje ? row.cantidad * 100 : row.cantidad);
+                                            setTempRendimiento(sec.label === 'Transporte y Flete' ? (row._originalRow?.distancia_ ?? 0) : (row._originalRow?.rendimiento_ ?? 1));
                                           }
                                         }}
-                                        className="cursor-pointer hover:bg-stone-100 hover:text-orange-650 px-2 py-1 rounded transition-all font-bold text-stone-600 inline-flex items-center gap-1"
-                                        title="Haga clic para editar cantidad"
+                                        className={`${proyectoActivo?.miRol !== 'lector' ? 'cursor-pointer hover:bg-stone-100 hover:text-orange-650' : ''} px-2 py-1 rounded transition-all font-bold text-stone-600 inline-flex items-center gap-1 font-mono text-xs`}
+                                        title={sec.label === 'Materiales' ? "Haga clic para editar consumo" : sec.label === 'Transporte y Flete' ? "Haga clic para editar distancia" : "Haga clic para editar rendimiento"}
                                       >
-                                        {row.cantidad} <i className="ti ti-pencil text-[8px] text-stone-400"></i>
+                                        {Number(displayEditValue).toFixed(sec.label === 'Materiales' ? 4 : 2)} {proyectoActivo?.miRol !== 'lector' && <i className="ti ti-pencil text-[8px] text-stone-400"></i>}
                                       </span>
                                     )}
                                   </td>
@@ -532,34 +583,36 @@ export default function RubrosPanel({
                                     ${Number(row.precio_total).toFixed(2)}
                                   </td>
                                   <td className="py-2 px-3 text-center">
-                                    {filaEnConfirmacionEliminar === row.codigo ? (
-                                      <div className="flex gap-2 items-center justify-center">
+                                    {proyectoActivo?.miRol !== 'lector' && (
+                                      filaEnConfirmacionEliminar === row.codigo ? (
+                                        <div className="flex gap-2 items-center justify-center">
+                                          <button
+                                            onClick={() => ejecutarEliminarInsumo(row)}
+                                            disabled={cargandoAccion}
+                                            className="text-emerald-600 hover:text-emerald-700 p-0.5 cursor-pointer"
+                                            title="Confirmar"
+                                          >
+                                            <i className="ti ti-check text-[11px] font-black"></i>
+                                          </button>
+                                          <button
+                                            onClick={() => setFilaEnConfirmacionEliminar(null)}
+                                            disabled={cargandoAccion}
+                                            className="text-rose-600 hover:text-rose-700 p-0.5 cursor-pointer"
+                                            title="Cancelar"
+                                          >
+                                            <i className="ti ti-x text-[11px] font-black"></i>
+                                          </button>
+                                        </div>
+                                      ) : (
                                         <button
-                                          onClick={() => ejecutarEliminarInsumo(row)}
+                                          onClick={() => setFilaEnConfirmacionEliminar(row.codigo)}
                                           disabled={cargandoAccion}
-                                          className="text-emerald-600 hover:text-emerald-700 p-0.5 cursor-pointer"
-                                          title="Confirmar"
+                                          className="text-stone-300 hover:text-rose-600 transition-colors p-1 cursor-pointer"
+                                          title="Quitar de la receta"
                                         >
-                                          <i className="ti ti-check text-[11px] font-black"></i>
+                                          <i className="ti ti-trash text-sm"></i>
                                         </button>
-                                        <button
-                                          onClick={() => setFilaEnConfirmacionEliminar(null)}
-                                          disabled={cargandoAccion}
-                                          className="text-rose-600 hover:text-rose-700 p-0.5 cursor-pointer"
-                                          title="Cancelar"
-                                        >
-                                          <i className="ti ti-x text-[11px] font-black"></i>
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        onClick={() => setFilaEnConfirmacionEliminar(row.codigo)}
-                                        disabled={cargandoAccion}
-                                        className="text-stone-300 hover:text-rose-600 transition-colors p-1 cursor-pointer"
-                                        title="Quitar de la receta"
-                                      >
-                                        <i className="ti ti-trash text-sm"></i>
-                                      </button>
+                                      )
                                     )}
                                   </td>
                                 </tr>

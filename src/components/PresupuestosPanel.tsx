@@ -32,6 +32,7 @@ interface PresupuestosPanelProps {
   editarPresupuesto: (p: any) => void;
   generarPresupuestoConIA?: (ubicacion: string, tipoProyecto: string, descripcion: string) => Promise<void>;
   cargandoIA?: boolean;
+  proyectoActivo?: any;
 }
 
 export default function PresupuestosPanel({
@@ -59,6 +60,7 @@ export default function PresupuestosPanel({
   editarPresupuesto,
   generarPresupuestoConIA,
   cargandoIA,
+  proyectoActivo,
 }: PresupuestosPanelProps) {
   // Estado local para agregar un nuevo capítulo si se desea
   const [nuevoCapNombre, setNuevoCapNombre] = React.useState('');
@@ -101,12 +103,14 @@ export default function PresupuestosPanel({
                   Encuentre, edite e imprima reportes de obras civiles y cotizaciones activas.
                 </p>
               </div>
-              <button
-                onClick={() => setMostrarCreadorPresupuesto(true)}
-                className="bg-orange-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 hover:bg-orange-700 active:scale-95 cursor-pointer transition-all shadow-md shadow-orange-600/10"
-              >
-                <i className="ti ti-plus font-extrabold"></i> Nueva Estimación
-              </button>
+              {proyectoActivo?.miRol !== 'lector' && (
+                <button
+                  onClick={() => setMostrarCreadorPresupuesto(true)}
+                  className="bg-orange-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 hover:bg-orange-700 active:scale-95 cursor-pointer transition-all shadow-md shadow-orange-600/10"
+                >
+                  <i className="ti ti-plus font-extrabold"></i> Nueva Estimación
+                </button>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-4 pr-1">
@@ -125,6 +129,7 @@ export default function PresupuestosPanel({
                       <select
                         value={p.estado}
                         onChange={(e) => cambiarEstadoPresupuesto(p.id, e.target.value as any)}
+                        disabled={proyectoActivo?.miRol === 'lector'}
                         className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border outline-none cursor-pointer transition-colors ${
                           p.estado === 'Aprobado'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-250 hover:bg-emerald-100/60'
@@ -171,13 +176,15 @@ export default function PresupuestosPanel({
                       >
                         <i className="ti ti-edit"></i> Editar
                       </button>
-                      <button
-                        className="text-stone-300 hover:text-red-600 cursor-pointer p-2 rounded-xl hover:bg-stone-200 transition-colors"
-                        onClick={() => eliminarPresupuesto(p.id)}
-                        title="Eliminar estimación"
-                      >
-                        <i className="ti ti-trash text-xs"></i>
-                      </button>
+                      {proyectoActivo?.miRol !== 'lector' && (
+                        <button
+                          className="text-stone-300 hover:text-red-600 cursor-pointer p-2 rounded-xl hover:bg-stone-200 transition-colors"
+                          onClick={() => eliminarPresupuesto(p.id)}
+                          title="Eliminar estimación"
+                        >
+                          <i className="ti ti-trash text-xs"></i>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -220,6 +227,7 @@ export default function PresupuestosPanel({
                   placeholder="Ej: Ampliación Residencia Los Laureles..."
                   className="w-full text-xs p-3 border border-stone-300 rounded-xl bg-stone-50/50 outline-none focus:bg-white focus:border-orange-500 transition-all font-semibold text-stone-700"
                   value={nuevoPresupuesto.proyecto || ''}
+                  readOnly={proyectoActivo?.miRol === 'lector'}
                   onChange={(e) => setNuevoPresupuesto((prev: any) => ({ ...prev, proyecto: e.target.value }))}
                 />
               </div>
@@ -232,6 +240,7 @@ export default function PresupuestosPanel({
                   placeholder="Ej: Consorcio Vial Metropolitano S.A..."
                   className="w-full text-xs p-3 border border-stone-300 rounded-xl bg-stone-50/50 outline-none focus:bg-white focus:border-orange-500 transition-all font-semibold text-stone-700"
                   value={nuevoPresupuesto.cliente || ''}
+                  readOnly={proyectoActivo?.miRol === 'lector'}
                   onChange={(e) => setNuevoPresupuesto((prev: any) => ({ ...prev, cliente: e.target.value }))}
                 />
               </div>
@@ -239,27 +248,29 @@ export default function PresupuestosPanel({
 
             {/* Listado capitular y tablas */}
             <div className="flex-1 overflow-y-auto p-5 space-y-6">
-              <div className="flex justify-between items-center bg-stone-50 p-4 rounded-2xl border border-stone-200">
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Agregador de Rubros de Control</span>
-                  <span className="text-[11px] text-stone-600 mt-0.5">Asigne capítulos adicionales de cómputo</span>
+              {proyectoActivo?.miRol !== 'lector' && (
+                <div className="flex justify-between items-center bg-stone-50 p-4 rounded-2xl border border-stone-200">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-stone-400 uppercase tracking-wider">Agregador de Rubros de Control</span>
+                    <span className="text-[11px] text-stone-600 mt-0.5">Asigne capítulos adicionales de cómputo</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nuevo Capítulo..."
+                      value={nuevoCapNombre}
+                      onChange={(e) => setNuevoCapNombre(e.target.value)}
+                      className="px-3 py-1.5 border border-stone-300 rounded-lg bg-white text-xs outline-none text-stone-700 font-medium"
+                    />
+                    <button
+                      onClick={handleCrearCapitulo}
+                      className="bg-stone-900 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+                    >
+                      Crear Sección
+                    </button>
+                  </div>
                 </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Nuevo Capítulo..."
-                    value={nuevoCapNombre}
-                    onChange={(e) => setNuevoCapNombre(e.target.value)}
-                    className="px-3 py-1.5 border border-stone-300 rounded-lg bg-white text-xs outline-none text-stone-700 font-medium"
-                  />
-                  <button
-                    onClick={handleCrearCapitulo}
-                    className="bg-stone-900 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors"
-                  >
-                    Crear Sección
-                  </button>
-                </div>
-              </div>
+              )}
 
               {((nuevoPresupuesto.capitulos) || []).map((cap: any, capIdx: number) => {
                 const esActivo = nuevoPresupuesto.capituloActivo === cap.nombre;
@@ -325,6 +336,7 @@ export default function PresupuestosPanel({
                                   min="0"
                                   step="any"
                                   value={item.cantidad || ''}
+                                  readOnly={proyectoActivo?.miRol === 'lector'}
                                   onChange={(e) => {
                                     const v = parseFloat(e.target.value);
                                     actualizarCantidadPlanilla(cap.nombre, idx, isNaN(v) ? 0 : v);
@@ -336,13 +348,15 @@ export default function PresupuestosPanel({
                                 ${Number(item.subtotal || 0).toFixed(2)}
                               </td>
                               <td className="py-3 px-3 text-center">
-                                <button
-                                  onClick={() => removerFilaPlanilla(cap.nombre, idx)}
-                                  className="text-stone-300 hover:text-red-500 transition-colors cursor-pointer"
-                                  title="Remover rubro"
-                                >
-                                  <i className="ti ti-trash text-xs"></i>
-                                </button>
+                                {proyectoActivo?.miRol !== 'lector' && (
+                                  <button
+                                    onClick={() => removerFilaPlanilla(cap.nombre, idx)}
+                                    className="text-stone-300 hover:text-red-500 transition-colors cursor-pointer"
+                                    title="Remover rubro"
+                                  >
+                                    <i className="ti ti-trash text-xs"></i>
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -372,160 +386,151 @@ export default function PresupuestosPanel({
           {/* Columna Derecha: Canasta de Inserción e Impuestos */}
           <div className="w-1/3 flex flex-col h-full bg-stone-50 overflow-y-auto p-5 space-y-5">
             {/* Buscador y Semillas de Inserción */}
-            <div className="bg-white border border-stone-200 rounded-3xl p-5 shadow-sm space-y-4">
-              {/* Tab Selector */}
-              <div className="flex border-b border-stone-150 pb-1.5 mb-2 gap-1">
-                <button
-                  type="button"
-                  onClick={() => setCanalInsercion('manual')}
-                  className={`flex-1 pb-1.5 text-[10px] font-black uppercase tracking-wider text-center cursor-pointer transition-all border-b-2 outline-none ${
-                    canalInsercion === 'manual'
-                      ? 'border-orange-600 text-stone-850'
-                      : 'border-transparent text-stone-400 hover:text-stone-600'
-                  }`}
-                >
-                  <i className="ti ti-hand-finger mr-1"></i> Catálogo Manual
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCanalInsercion('ia')}
-                  className={`flex-1 pb-1.5 text-[10px] font-black uppercase tracking-wider text-center cursor-pointer transition-all border-b-2 outline-none ${
-                    canalInsercion === 'ia'
-                      ? 'border-orange-600 text-stone-850'
-                      : 'border-transparent text-stone-400 hover:text-stone-600'
-                  }`}
-                >
-                  <i className="ti ti-sparkles mr-1 text-orange-500"></i> Generador IA
-                </button>
-              </div>
-
-              {canalInsercion === 'ia' ? (
-                <div className="space-y-3 pt-1">
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-bold text-stone-405 uppercase tracking-widest pl-1">
-                      Ubicación del Proyecto:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej: Quito, Valle de los Chillos"
-                      value={iaUbicacion}
-                      onChange={(e) => setIaUbicacion(e.target.value)}
-                      className="w-full text-xs px-3.5 py-2 border border-stone-250 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all font-semibold"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-bold text-stone-405 uppercase tracking-widest pl-1">
-                      Tipo de Proyecto:
-                    </label>
-                    <select
-                      value={iaTipoProyecto}
-                      onChange={(e) => setIaTipoProyecto(e.target.value)}
-                      className="w-full text-xs p-2.5 border border-stone-250 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all font-semibold text-stone-700 cursor-pointer"
-                    >
-                      <option value="Vivienda">Vivienda Unifamiliar</option>
-                      <option value="Comercial">Edificación Comercial</option>
-                      <option value="Estructuras Metálicas">Estructuras Metálicas</option>
-                      <option value="Vías">Obras Viales y Pavimentación</option>
-                      <option value="Cerramiento">Cerramiento / Muro de Contención</option>
-                      <option value="Personalizado">Otro / Personalizado</option>
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[9px] font-bold text-stone-405 uppercase tracking-widest pl-1">
-                      Descripción del Proyecto:
-                    </label>
-                    <textarea
-                      placeholder="Describa el alcance de la obra, ej: Construcción de zapatas de 1x1m, mampostería de bloque, enlucido y pintura para un local comercial de 50m²..."
-                      value={iaDescripcion}
-                      onChange={(e) => setIaDescripcion(e.target.value)}
-                      rows={4}
-                      className="w-full text-xs px-3 py-2 border border-stone-250 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all font-medium leading-relaxed resize-none"
-                    />
-                  </div>
-
+            {proyectoActivo?.miRol !== 'lector' && (
+              <div className="bg-white border border-stone-200 rounded-3xl p-5 shadow-sm space-y-4">
+                {/* Tab Selector */}
+                <div className="flex border-b border-stone-150 pb-1.5 mb-2 gap-1">
                   <button
                     type="button"
-                    onClick={handleGenerarIA}
-                    disabled={cargandoIA}
-                    className="w-full bg-stone-900 hover:bg-orange-600 text-white font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:bg-stone-300 disabled:cursor-not-allowed select-none"
+                    onClick={() => setCanalInsercion('manual')}
+                    className={`flex-1 pb-1.5 text-[10px] font-black uppercase tracking-wider text-center cursor-pointer transition-all border-b-2 outline-none ${
+                      canalInsercion === 'manual'
+                        ? 'border-orange-600 text-stone-850'
+                        : 'border-transparent text-stone-400 hover:text-stone-600'
+                    }`}
                   >
-                    {cargandoIA ? (
-                      <>
-                        <i className="ti ti-loader animate-spin text-sm"></i>
-                        <span>Generando Estructura...</span>
-                      </>
-                    ) : (
-                      <>
-                        <i className="ti ti-sparkles text-orange-405 animate-pulse"></i>
-                        <span>Generar Presupuesto con IA</span>
-                      </>
-                    )}
+                    <i className="ti ti-hand-finger mr-1"></i> Catálogo Manual
                   </button>
-
-                  {cargandoIA && (
-                    <div className="bg-orange-500/5 border border-orange-150 p-4.5 rounded-2xl flex flex-col items-center justify-center text-center gap-2 mt-2">
-                      <span className="text-[10px] font-black uppercase text-orange-600 tracking-wider flex items-center gap-1 animate-pulse">
-                        ✨ El Asistente IA está trabajando
-                      </span>
-                      <p className="text-[9.5px] text-stone-500 leading-normal">
-                        Analizando catálogo de rubros, mapeando rendimientos y construyendo la matriz del presupuesto...
-                      </p>
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setCanalInsercion('ia')}
+                    className={`flex-1 pb-1.5 text-[10px] font-black uppercase tracking-wider text-center cursor-pointer transition-all border-b-2 outline-none ${
+                      canalInsercion === 'ia'
+                        ? 'border-orange-600 text-stone-850'
+                        : 'border-transparent text-stone-400 hover:text-stone-600'
+                    }`}
+                  >
+                    <i className="ti ti-sparkles mr-1 text-orange-500"></i> Generador IA
+                  </button>
                 </div>
-              ) : (
-                <>
-                  <div className="relative">
-                    <i className="ti ti-search absolute left-3 top-2.5 text-stone-400"></i>
-                    <input
-                      type="text"
-                      placeholder="Buscar rubros de catálogo..."
-                      value={busquedaRubro}
-                      onChange={(e) => setBusquedaRubro(e.target.value)}
-                      className="w-full text-xs pl-8 pr-3 py-1.5 border border-stone-300 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all shadow-sm"
-                    />
-                  </div>
 
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[9px] font-bold text-stone-400 uppercase tracking-widest pl-1">
-                      Capítulo de Destino (Añadir a):
-                    </label>
-                    <select
-                      value={nuevoPresupuesto.capituloActivo || ''}
-                      onChange={(e) => setNuevoPresupuesto((prev: any) => ({ ...prev, capituloActivo: e.target.value }))}
-                      className="w-full text-xs p-2.5 border border-stone-250 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all font-semibold text-stone-700 cursor-pointer"
-                    >
-                      {(nuevoPresupuesto.capitulos || []).map((cap: any) => (
-                        <option key={cap.nombre} value={cap.nombre}>
-                          {cap.nombre}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                {canalInsercion === 'ia' ? (
+                  <div className="space-y-3 pt-1">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] font-bold text-stone-405 uppercase tracking-widest pl-1">
+                        Ubicación del Proyecto:
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ej: Quito, Valle de los Chillos"
+                        value={iaUbicacion}
+                        onChange={(e) => setIaUbicacion(e.target.value)}
+                        className="w-full text-xs px-3.5 py-2 border border-stone-250 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all font-semibold"
+                      />
+                    </div>
 
-                  <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
-                    {rubrosFiltrados.map((r) => (
-                      <button
-                        key={r.id_rubro}
-                        onClick={() => agregarRubroAPlanilla(r)}
-                        className="w-full p-2.5 bg-stone-50 hover:bg-orange-50/50 hover:border-orange-200 border border-stone-200 rounded-xl text-left flex justify-between items-center transition-colors cursor-pointer"
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] font-bold text-stone-405 uppercase tracking-widest pl-1">
+                        Tipo de Proyecto:
+                      </label>
+                      <select
+                        value={iaTipoProyecto}
+                        onChange={(e) => setIaTipoProyecto(e.target.value)}
+                        className="w-full text-xs p-2.5 border border-stone-250 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all font-semibold text-stone-700 cursor-pointer"
                       >
-                        <div className="flex flex-col truncate max-w-[155px]">
-                          <span className="font-mono text-[8px] font-black text-stone-450">{r.id_rubro}</span>
-                          <strong className="text-[10px] font-black text-stone-700 truncate mt-0.5">{r.nombre_rubro}</strong>
-                        </div>
-                        <div className="text-right flex items-center gap-1.5 shrink-0">
-                          <span className="font-mono text-[10px] font-semibold text-orange-605">${Number(r.precio_rubro).toFixed(2)}</span>
-                          <i className="ti ti-circle-plus text-stone-400 text-xs"></i>
-                        </div>
-                      </button>
-                    ))}
+                        <option value="Vivienda">Vivienda Unifamiliar</option>
+                        <option value="Comercial">Edificación Comercial</option>
+                        <option value="Estructuras Metálicas">Estructuras Metálicas</option>
+                        <option value="Vías">Obras Viales y Pavimentación</option>
+                        <option value="Cerramiento">Cerramiento / Muro de Contención</option>
+                        <option value="Personalizado">Otro / Personalizado</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[9px] font-bold text-stone-405 uppercase tracking-widest pl-1">
+                        Descripción del Proyecto:
+                      </label>
+                      <textarea
+                        placeholder="Describa el alcance de la obra, ej: Construcción de zapatas de 1x1m, mampostería de bloque, enlucido y pintura para un local comercial de 50m²..."
+                        value={iaDescripcion}
+                        onChange={(e) => setIaDescripcion(e.target.value)}
+                        rows={4}
+                        className="w-full text-xs px-3 py-2 border border-stone-250 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all font-medium leading-relaxed resize-none"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleGenerarIA}
+                      disabled={cargandoIA}
+                      className="w-full bg-stone-900 hover:bg-orange-600 text-white font-bold text-xs uppercase tracking-wider py-3 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer disabled:bg-stone-300 disabled:cursor-not-allowed select-none"
+                    >
+                      {cargandoIA ? (
+                        <>
+                          <i className="ti ti-loader animate-spin text-sm"></i>
+                          <span>Generando Estructura...</span>
+                        </>
+                      ) : (
+                        <>
+                          <i className="ti ti-sparkles text-orange-405 animate-pulse"></i>
+                          <span>Generar Presupuesto con IA</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                </>
-              )}
-            </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <i className="ti ti-search absolute left-3 top-2.5 text-stone-400"></i>
+                      <input
+                        type="text"
+                        placeholder="Buscar rubros de catálogo..."
+                        value={busquedaRubro}
+                        onChange={(e) => setBusquedaRubro(e.target.value)}
+                        className="w-full text-xs pl-8 pr-3 py-1.5 border border-stone-300 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all shadow-sm"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[9px] font-bold text-stone-400 uppercase tracking-widest pl-1">
+                        Capítulo de Destino (Añadir a):
+                      </label>
+                      <select
+                        value={nuevoPresupuesto.capituloActivo || ''}
+                        onChange={(e) => setNuevoPresupuesto((prev: any) => ({ ...prev, capituloActivo: e.target.value }))}
+                        className="w-full text-xs p-2.5 border border-stone-250 rounded-xl bg-stone-50 outline-none focus:border-orange-500 focus:bg-white transition-all font-semibold text-stone-700 cursor-pointer"
+                      >
+                        {(nuevoPresupuesto.capitulos || []).map((cap: any) => (
+                          <option key={cap.nombre} value={cap.nombre}>
+                            {cap.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
+                      {rubrosFiltrados.map((r) => (
+                        <button
+                          key={r.id_rubro}
+                          onClick={() => agregarRubroAPlanilla(r)}
+                          className="w-full p-2.5 bg-stone-50 hover:bg-orange-50/50 hover:border-orange-200 border border-stone-200 rounded-xl text-left flex justify-between items-center transition-colors cursor-pointer"
+                        >
+                          <div className="flex flex-col truncate max-w-[155px]">
+                            <span className="font-mono text-[8px] font-black text-stone-450">{r.id_rubro}</span>
+                            <strong className="text-[10px] font-black text-stone-700 truncate mt-0.5">{r.nombre_rubro}</strong>
+                          </div>
+                          <div className="text-right flex items-center gap-1.5 shrink-0">
+                            <span className="font-mono text-[10px] font-semibold text-orange-605">${Number(r.precio_rubro).toFixed(2)}</span>
+                            <i className="ti ti-circle-plus text-stone-400 text-xs"></i>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Ficha Resumen de Precios Indirectos */}
             <div className="bg-white border border-stone-250 rounded-3xl p-5 shadow-sm space-y-3 text-xs text-stone-600">
@@ -563,12 +568,22 @@ export default function PresupuestosPanel({
                   ${granTotalNuevoPresupuesto.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </strong>
                 
-                <button
-                  onClick={guardarNuevoPresupuesto}
-                  className="bg-orange-600 hover:bg-orange-700 text-white w-full py-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md cursor-pointer mt-4 transition-colors border border-orange-550 select-none text-center"
-                >
-                  <i className="ti ti-device-floppy"></i> Guardar Presupuesto de Obra
-                </button>
+                {proyectoActivo?.miRol !== 'lector' && (
+                  <div className="mt-8 flex flex-col gap-3">
+                    <button
+                      onClick={guardarNuevoPresupuesto}
+                      className="bg-orange-600 hover:bg-orange-700 text-white w-full py-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md cursor-pointer transition-colors border border-orange-550 select-none text-center"
+                    >
+                      <i className="ti ti-device-floppy"></i> Guardar Presupuesto de Obra
+                    </button>
+                    <button
+                      onClick={() => setMostrarCreadorPresupuesto(false)}
+                      className="w-full py-2.5 bg-stone-800 text-stone-400 hover:text-white text-[10px] font-bold rounded-xl transition-colors cursor-pointer"
+                    >
+                      Descartar Edición
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

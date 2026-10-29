@@ -1,8 +1,15 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from './types/database';
+
+export type { Database };
+export type Tables<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row'];
+export type TablesInsert<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Insert'];
+export type TablesUpdate<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Update'];
 
 // Intentar leer las credenciales de Supabase del entorno del cliente
-const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || '';
+const rawUrl = ((import.meta as any).env.VITE_SUPABASE_URL || '').trim();
+const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+const supabaseAnonKey = ((import.meta as any).env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 export const isLiveSupabase = !!(supabaseUrl && supabaseAnonKey);
 
@@ -112,11 +119,29 @@ const MOCK_RECETA_TRANSP: Record<string, any[]> = {
 // Initialize localStorage engine helper
 const initLocalStorage = () => {
   if (typeof window !== 'undefined') {
-    if (!localStorage.getItem('INSUMOS_MAT')) localStorage.setItem('INSUMOS_MAT', JSON.stringify(MOCK_INSUMOS_MAT));
-    if (!localStorage.getItem('INSUMOS_MOB')) localStorage.setItem('INSUMOS_MOB', JSON.stringify(MOCK_INSUMOS_MOB));
-    if (!localStorage.getItem('INSUMOS_EYH')) localStorage.setItem('INSUMOS_EYH', JSON.stringify(MOCK_INSUMOS_EYH));
-    if (!localStorage.getItem('INSUMOS_TRANSP')) localStorage.setItem('INSUMOS_TRANSP', JSON.stringify(MOCK_INSUMOS_TRANSP));
-    if (!localStorage.getItem('RUBROS')) localStorage.setItem('RUBROS', JSON.stringify(MOCK_RUBROS));
+    const defaultProject = {
+      id: "proj-demo-001",
+      nombre_proyecto: "Edificio Residencial San Pedro (Demo)",
+      codigo_acceso: "DEMO1234",
+      creador_id: "mock-user",
+      created_at: new Date().toISOString()
+    };
+    const defaultMembership = {
+      id: "m-demo-001",
+      proyecto_id: "proj-demo-001",
+      user_id: "mock-user",
+      rol: "admin",
+      created_at: new Date().toISOString()
+    };
+    if (!localStorage.getItem('PROYECTOS')) localStorage.setItem('PROYECTOS', JSON.stringify([defaultProject]));
+    if (!localStorage.getItem('MIEMBROS_PROYECTO')) localStorage.setItem('MIEMBROS_PROYECTO', JSON.stringify([defaultMembership]));
+    if (!localStorage.getItem('PROFILES')) localStorage.setItem('PROFILES', JSON.stringify([{ id: "mock-user", email: "demo@apustudio.com", nombre: "Usuario Demo" }]));
+
+    if (!localStorage.getItem('INSUMOS_MAT')) localStorage.setItem('INSUMOS_MAT', JSON.stringify(MOCK_INSUMOS_MAT.map(i => ({ ...i, proyecto_id: "proj-demo-001" }))));
+    if (!localStorage.getItem('INSUMOS_MOB')) localStorage.setItem('INSUMOS_MOB', JSON.stringify(MOCK_INSUMOS_MOB.map(i => ({ ...i, proyecto_id: "proj-demo-001" }))));
+    if (!localStorage.getItem('INSUMOS_EYH')) localStorage.setItem('INSUMOS_EYH', JSON.stringify(MOCK_INSUMOS_EYH.map(i => ({ ...i, proyecto_id: "proj-demo-001" }))));
+    if (!localStorage.getItem('INSUMOS_TRANSP')) localStorage.setItem('INSUMOS_TRANSP', JSON.stringify(MOCK_INSUMOS_TRANSP.map(i => ({ ...i, proyecto_id: "proj-demo-001" }))));
+    if (!localStorage.getItem('RUBROS')) localStorage.setItem('RUBROS', JSON.stringify(MOCK_RUBROS.map(r => ({ ...r, proyecto_id: "proj-demo-001" }))));
     if (!localStorage.getItem('PRESUPUESTOS')) localStorage.setItem('PRESUPUESTOS', JSON.stringify([]));
 
     // Seed recipe flat tables to enable fully functional local recipe editing
@@ -195,6 +220,7 @@ class MockQueryBuilder {
   private orderCol?: string;
   private orderAscending = true;
   private limitCount?: number;
+  private orExpression?: string;
 
   constructor(table: string) {
     this.table = table;
@@ -313,6 +339,11 @@ class MockQueryBuilder {
     return this;
   }
 
+  or(expr: string) {
+    this.orExpression = expr;
+    return this;
+  }
+
   order(col: string, { ascending } = { ascending: true }) {
     this.orderCol = col;
     this.orderAscending = ascending;
@@ -332,6 +363,24 @@ class MockQueryBuilder {
       if (this.filters.length > 0) {
         list = list.filter((item: any) => {
           return this.filters.every(f => String(item[f.col]) === String(f.val));
+        });
+      }
+
+      if (this.orExpression) {
+        const parts = this.orExpression.split(',');
+        list = list.filter((item: any) => {
+          return parts.some(part => {
+            if (part.includes('.is.null')) {
+              const col = part.split('.')[0];
+              return item[col] === undefined || item[col] === null;
+            }
+            if (part.includes('.eq.')) {
+              const col = part.split('.')[0];
+              const val = part.split('.eq.')[1];
+              return String(item[col] ?? '') === val;
+            }
+            return true;
+          });
         });
       }
 
@@ -366,9 +415,15 @@ class MockQueryBuilder {
 }
 
 // Standard supabase client instance or fluent Mock builder
-let liveClient: any = null;
+let liveClient: SupabaseClient<Database> | null = null;
 if (isLiveSupabase) {
-  liveClient = createClient(supabaseUrl, supabaseAnonKey);
+  liveClient = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
 }
 
 const mockClient = {
@@ -381,4 +436,16 @@ const mockClient = {
   }
 };
 
-export const supabase = isLiveSupabase ? liveClient : mockClient;
+export const supabase: any = isLiveSupabase ? liveClient : mockClient;
+export const getSupabaseClient = (): SupabaseClient<Database> => {
+  if (!liveClient) {
+    liveClient = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    });
+  }
+  return liveClient;
+};

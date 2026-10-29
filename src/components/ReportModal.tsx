@@ -7,14 +7,17 @@ interface ReportModalProps {
 }
 
 export default function ReportModal({ presupuesto, onClose, onTriggerBrowserPrint }: ReportModalProps) {
-  // Calculos economicos rapidos redundantes para asegurar robustez
+  const indPct = presupuesto.porcentaje_indirectos ?? 12;
+  const utiPct = presupuesto.porcentaje_utilidad ?? 8;
+  const ivaPct = presupuesto.porcentaje_iva ?? 10;
+
   const items = presupuesto.items || [];
-  const cd = items.reduce((a: number, b: any) => a + (Number(b.subtotal || b.cantidad * (b.precio || b.precio_rubro || 0)) || 0), 0);
-  const indirectos = cd * 0.12;
-  const utilidad = cd * 0.08;
-  const subtotal = cd + indirectos + utilidad;
-  const iva = subtotal * 0.10;
-  const total = subtotal + iva;
+  const cd = presupuesto.costo_directo_total ?? items.reduce((a: number, b: any) => a + (Number(b.subtotal || b.cantidad * (b.precio || b.precio_rubro || 0)) || 0), 0);
+  const indirectos = presupuesto.costo_indirecto_total ?? (cd * (indPct / 100));
+  const utilidad = presupuesto.monto_utilidad ?? (cd * (utiPct / 100));
+  const subtotal = presupuesto.subtotal_sin_iva ?? (cd + indirectos + utilidad);
+  const iva = presupuesto.monto_iva ?? (subtotal * (ivaPct / 100));
+  const total = presupuesto.monto_total ?? presupuesto.monto ?? (subtotal + iva);
 
   // Agrupar items por capítulo
   const capitulosMap: Record<string, any[]> = {};
@@ -147,11 +150,11 @@ export default function ReportModal({ presupuesto, onClose, onTriggerBrowserPrin
                 <span className="font-mono">${cd.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-stone-400 text-[10px]">
-                <span>Gastos Generales / Indirectos (12%):</span>
+                <span>Gastos Generales / Indirectos ({indPct}%):</span>
                 <span className="font-mono">${indirectos.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-stone-400 text-[10px]">
-                <span>Margen sobre Obra (8%):</span>
+                <span>Margen sobre Obra ({utiPct}%):</span>
                 <span className="font-mono">${utilidad.toFixed(2)}</span>
               </div>
               
@@ -160,7 +163,7 @@ export default function ReportModal({ presupuesto, onClose, onTriggerBrowserPrin
                 <span className="font-mono">${subtotal.toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-stone-400 text-[10px]">
-                <span>IVA Ley Licitación (10%):</span>
+                <span>IVA Ley Licitación ({ivaPct}%):</span>
                 <span className="font-mono">${iva.toFixed(2)}</span>
               </div>
 

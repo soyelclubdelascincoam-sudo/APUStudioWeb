@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase, isLiveSupabase } from '../supabase';
 
+import { Proyecto } from '../types';
+
 interface StorageFile {
   name: string;
   id: string;
@@ -8,7 +10,11 @@ interface StorageFile {
   metadata?: any;
 }
 
-export default function UploadPanel() {
+interface UploadPanelProps {
+  proyectoActivo: Proyecto | null;
+}
+
+export default function UploadPanel({ proyectoActivo }: UploadPanelProps) {
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -139,7 +145,13 @@ export default function UploadPanel() {
 
     // Limpieza de nombre para evitar caracteres conflictivos
     const safeName = `${Date.now()}-${selectedFile.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`;
-    const filePath = `${selectedFolderForUpload}/${safeName}`;
+    
+    // Carpeta de almacenamiento vinculada a la obra o general
+    const folderPrefix = proyectoActivo?.id || proyectoActivo?.organizacion_id || 'general';
+
+    const filePath = isLiveSupabase 
+      ? `${folderPrefix}/${selectedFolderForUpload}/${safeName}`
+      : `${selectedFolderForUpload}/${safeName}`;
 
     if (!isLiveSupabase) {
       // Simulación local
