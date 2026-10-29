@@ -1,6 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase, isLiveSupabase, getSupabaseClient } from './supabase';
+
+const isValidUuid = (id?: string | null): boolean => {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+};
 import {
   InsumoMaterial,
   InsumoManoObra,
@@ -57,15 +62,22 @@ export default function App() {
   const [sidebarColapsado, setSidebarColapsado] = useState(false);
   const toggleSidebar = () => setSidebarColapsado((p) => !p);
 
-  // Derivar usuario desde AuthContext
-  const usuario = authUser ? { email: authUser.email || '', id: authUser.id } : null;
+  // Derivar usuario desde AuthContext con useMemo para prevenir render loops infinitos
+  const usuario = useMemo(() => {
+    return authUser ? { email: authUser.email || '', id: authUser.id } : null;
+  }, [authUser?.id, authUser?.email]);
 
   // Active Project & Roles State
   const [proyectoActivo, setProyectoActivo] = useState<Proyecto | null>(() => {
-    const saved = localStorage.getItem('proyecto_activo');
+    const saved = localStorage.getItem('apustudio_proyecto_activo') || localStorage.getItem('proyecto_activo');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed?.id && isValidUuid(parsed.id)) {
+          return parsed;
+        }
+        localStorage.removeItem('apustudio_proyecto_activo');
+        localStorage.removeItem('proyecto_activo');
       } catch (e) {}
     }
     return null;
@@ -83,6 +95,7 @@ export default function App() {
   const seleccionarProyecto = (proj: Proyecto) => {
     setProyectoActivo(proj);
     cambiarProyectoActivo(proj);
+    localStorage.setItem('apustudio_proyecto_activo', JSON.stringify(proj));
     localStorage.setItem('proyecto_activo', JSON.stringify(proj));
     setMostrarModalProyectos(false);
     mostrarToast(`Proyecto activo: "${proj.nombre_proyecto || proj.nombre}"`, 'info');
@@ -92,6 +105,7 @@ export default function App() {
     try {
       await authCerrarSesion();
       setProyectoActivo(null);
+      localStorage.removeItem('apustudio_proyecto_activo');
       localStorage.removeItem('proyecto_activo');
       mostrarToast('Sesión cerrada correctamente.', 'info');
     } catch (error: any) {
@@ -229,10 +243,14 @@ export default function App() {
   const granTotalNuevoPresupuesto = subtotalConIndirectos + montoIva;
 
   // ── DATA SYNCHRONIZATION FROM SUPABASE/V_DB ──────────────────────────────────────
-  const cargarPresupuestos = async () => {
-    if (!usuario) return;
+  const cargarPresupuestos = useCallback(async () => {
+    if (!authUser) return;
+    if (isLiveSupabase && !organizacionActiva) return;
+
     try {
       if (isLiveSupabase && organizacionActiva) {
+        if (!isValidUuid(organizacionActiva.id)) return;
+
         const client = getSupabaseClient();
         let query = client
           .from('presupuestos')
@@ -273,12 +291,16 @@ export default function App() {
           `)
           .eq('organizacion_id', organizacionActiva.id);
 
-        if (proyectoActivo?.id) {
-          query = query.eq('proyecto_id', proyectoActivo.id);
+        if (isValidUuid(proyectoActivo?.id)) {
+          query = query.eq('proyecto_id', proyectoActivo!.id);
         }
 
         const { data, error } = await query.order('created_at', { ascending: false });
-        if (error) throw error;
+        if (error) {
+          console.error('Error al consultar presupuestos de Supabase:', error);
+          mostrarToast('No se pudieron cargar los presupuestos de Supabase.', 'error');
+          return;
+        }
 
         if (data) {
           setPresupuestos(
@@ -342,20 +364,34 @@ export default function App() {
       console.error('Error cargando presupuestos:', error);
       mostrarToast('No se pudieron cargar los presupuestos de Supabase.', 'error');
     }
-  };
+  }, [authUser?.id, organizacionActiva?.id, proyectoActivo?.id]);
 
-  const cargarDatos = async () => {
-    if (!usuario) return;
+  const cargarDatos = useCallback(async () => {
+    if (!authUser) return;
+    if (isLiveSupabase && !organizacionActiva) {
+      // Esperar a que AuthContext termine de cargar la organización activa
+      return;
+    }
+
     setCargando(true);
     try {
       if (isLiveSupabase && organizacionActiva) {
         const client = getSupabaseClient();
+        const orgIdValida = isValidUuid(organizacionActiva.id);
+        const proyIdValido = isValidUuid(proyectoActivo?.id);
 
         // 1. Obtener catálogos: global + el privado de la organización activa
-        const { data: cats } = await client
-          .from('catalogos')
-          .select('id, nombre, es_global')
-          .or(`es_global.eq.true,organizacion_id.eq.${organizacionActiva.id}`);
+        let catsQuery = client.from('catalogos').select('id, nombre, es_global');
+        if (orgIdValida) {
+          catsQuery = catsQuery.or(`es_global.eq.true,organizacion_id.eq.${organizacionActiva.id}`);
+        } else {
+          catsQuery = catsQuery.eq('es_global', true);
+        }
+
+        const { data: cats, error: errCats } = await catsQuery;
+        if (errCats) {
+          console.error('Error cargando catálogos:', errCats);
+        }
 
         const catalogoIds = (cats || []).map(c => c.id);
 
@@ -443,14 +479,14 @@ export default function App() {
         setInsumosTransp(transp);
 
         // 3. Cargar rubros: biblioteca global de APUs + rubros de la organización y proyecto
-        let rubrosQuery = client
-          .from('rubros')
-          .select('*');
+        let rubrosQuery = client.from('rubros').select('*');
 
-        if (proyectoActivo?.id) {
-          rubrosQuery = rubrosQuery.or(`es_global.eq.true,organizacion_id.eq.${organizacionActiva.id},proyecto_id.eq.${proyectoActivo.id}`);
-        } else {
+        if (orgIdValida && proyIdValido) {
+          rubrosQuery = rubrosQuery.or(`es_global.eq.true,organizacion_id.eq.${organizacionActiva.id},proyecto_id.eq.${proyectoActivo!.id}`);
+        } else if (orgIdValida) {
           rubrosQuery = rubrosQuery.or(`es_global.eq.true,organizacion_id.eq.${organizacionActiva.id}`);
+        } else {
+          rubrosQuery = rubrosQuery.eq('es_global', true);
         }
 
         const { data: rubrosDb, error: errRubros } = await rubrosQuery.order('nombre');
@@ -480,13 +516,13 @@ export default function App() {
     } finally {
       setCargando(false);
     }
-  };
+  }, [authUser?.id, organizacionActiva?.id, proyectoActivo?.id, cargarPresupuestos]);
 
   useEffect(() => {
-    if (usuario) {
+    if (authUser?.id && (!isLiveSupabase || organizacionActiva?.id)) {
       cargarDatos();
     }
-  }, [usuario, proyectoActivo]);
+  }, [authUser?.id, organizacionActiva?.id, proyectoActivo?.id, cargarDatos]);
 
   // ── CORE ACTIONS AND EVENT CONTROLLERS ───────────────────────────────────────────
   const cambiarTab = (tab: typeof tabActiva) => {

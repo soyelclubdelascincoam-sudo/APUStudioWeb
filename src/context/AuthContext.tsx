@@ -47,10 +47,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [rolOrg, setRolOrg] = useState<RolOrganizacion | null>(null);
   const [proyectoActivo, setProyectoActivo] = useState<Proyecto | null>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('apustudio_proyecto_activo');
+      const saved = localStorage.getItem('apustudio_proyecto_activo') || localStorage.getItem('proyecto_activo');
       if (saved) {
         try {
-          return JSON.parse(saved);
+          const parsed = JSON.parse(saved);
+          if (parsed?.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(parsed.id)) {
+            return parsed;
+          }
+          localStorage.removeItem('apustudio_proyecto_activo');
+          localStorage.removeItem('proyecto_activo');
         } catch {
           // ignore error
         }
